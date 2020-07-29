@@ -26,11 +26,11 @@ import (
 func main() {
 	// Enable overriding the rules location and/or dumping plugin info.
 	flags := flag.NewFlagSet("tf-provider-flags", flag.ContinueOnError)
-	rulesDir := flags.String("rules", "rules", "override default rules location")
 	dumpInfo := flags.Bool("get-plugin-info", false, "dump plugin info as JSON to stdout")
 	contract.IgnoreError(flags.Parse(os.Args[1:]))
+	args := flags.Args()
 
-	pack, e, err := loadPolicyPack(*rulesDir)
+	pack, e, err := loadPolicyPack(args[1])
 	if err != nil {
 		cmdutil.ExitError(err.Error())
 	}
@@ -42,7 +42,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if err := Serve(pack, e, flags.Args()); err != nil {
+	if err := Serve(pack, e, args); err != nil {
 		cmdutil.ExitError(err.Error())
 	}
 }
