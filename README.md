@@ -61,7 +61,7 @@ deny[msg] {
 You can now run an update on a Pulumi program locally using `pulumi up --policy-pack <path_to_policy_folder>` passing the path to the folder you created in the previous step.
 
 ```
-➜  app git:(master) ✗ pulumi up --policy-pack ../policy-kubernetes    
+$ pulumi up --policy-pack ../policy-kubernetes    
 Previewing update (dev):
      Type                           Name                   Plan       Info
  +   pulumi:pulumi:Stack            simple-kubernetes-dev  create     1 error
@@ -76,4 +76,4 @@ Policy Violations:
     nginx-me0llhgr must include Kubernetes recommended labels: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/#labels 
 ```
 
-Note that the policy was implemented in `labels.rego` using the Rego langauge, but applied to the deployment of a Pulumi program written in TypeScript.  Note also that the policy was run *before* the resource was deployed, and failed the preview stage.  This allows OPA policies to be enforced very early in the development and deployment process - close to the developers creating the infrastructure - allowing for a quicker security and policy feedback loop for the cloud engineering team.
+Note that the policy was implemented in `labels.rego` using the Rego language, but applied to the deployment of a Pulumi program written in TypeScript.  Note also that the policy was run *before* the resource was deployed, and failed the preview stage.  This allows OPA policies to be enforced very early in the development and deployment process - close to the developers creating the infrastructure - allowing for a quicker security and policy feedback loop for the cloud engineering team.
