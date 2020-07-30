@@ -1,0 +1,2 @@
+description: A minimal Policy Pack for Kubernetes using OPA.
+runtime: opa

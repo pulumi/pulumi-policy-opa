@@ -1,0 +1,3 @@
+name: simple-kubernetes
+runtime: nodejs
+description: A minimal Kubernetes TypeScript Pulumi program
