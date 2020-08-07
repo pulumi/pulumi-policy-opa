@@ -12,4 +12,15 @@ const deployment = new k8s.apps.v1.Deployment("nginx", {
         }
     }
 });
+const pod = new k8s.core.v1.Pod("myapp", {
+    spec: {
+        containers: [{
+            name: "nginx-frontend",
+            image: "nginx",
+        }, {
+            name: "mysql-backend",
+            image: "mysql",
+        }]
+    }
+});
 export const name = deployment.metadata.name;
