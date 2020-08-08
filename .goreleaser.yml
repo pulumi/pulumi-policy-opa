@@ -14,7 +14,8 @@ builds:
   binary: pulumi-analyzer-policy-opa
   main: ./cmd/pulumi-analyzer-policy-opa/
 archives:
-- name_template: "{{ .Binary }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
+- id: archive
+  name_template: "{{ .Binary }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
   format_overrides:
     - goos: windows
       format: zip
