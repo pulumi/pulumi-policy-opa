@@ -9,25 +9,20 @@ in addition to afterwards -- when certain other properties are known.
 
 The OPA integration implements the Pulumi plugin interface for policies. Unlike Pulumi's standard approach to
 implementing policy rules using [an SDK in a general purpose language](https://github.com/pulumi/pulumi-policy)
-this bridge lets you leverage any existing OPA rule within the overall Pulumi CrossGuard system.
+this bridge lets you author Pulumi Crossguard policies using OPA and `.rego` syntax.
 
 ## How to build and distribute
 
 The binary this repo builds is not intended to be run directly. It produces a plugin named `pulumi-policy-opa` which,
 when packaged with a set of OPA rules in the `rules/` directory, can be loaded by the Pulumi plugin system.
 
-First, build and install the OPA policy analyzer.
+First, install the OPA policy analyzer plugin.
 
 ```
-$ make install
-INSTALL:
-go install github.com/pulumi/pulumi-policy-opa/cmd/pulumi-analyzer-policy-opa
-```
-
-This will place `pulumi-analyzer-policy-opa` in your `GOBIN`.  If you haven't already - make sure `GOBIN` is in your `PATH`:
-
-```
-$ export PATH=$PATH:$(go env GOPATH)/bin
+$ pulumi plugin install analyzer policy-opa v0.0.2
+[analyzer plugin policy-opa-0.0.2] installing
+Downloading plugin: 6.11 MiB / 6.11 MiB [===========================] 100.00% 0s
+Moving plugin... done.
 ```
 
 You can now use OPA policy packs.  Create a folder that contains two files - a `PulumiPolicy.yaml` and one or more `.rego` files.
@@ -76,4 +71,19 @@ Policy Violations:
     nginx-me0llhgr must include Kubernetes recommended labels: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/#labels 
 ```
 
-Note that the policy was implemented in `labels.rego` using the Rego language, but applied to the deployment of a Pulumi program written in TypeScript.  Note also that the policy was run *before* the resource was deployed, and failed the preview stage.  This allows OPA policies to be enforced very early in the development and deployment process - close to the developers creating the infrastructure - allowing for a quicker security and policy feedback loop for the cloud engineering team.
+Note that the policy above was implemented in `labels.rego` using the Rego language, but applied to the deployment of a Pulumi program written in TypeScript.  Note also that the policy was run *before* the resource was deployed, and failed the preview stage.  This allows OPA policies to be enforced very early in the development and deployment process - close to the developers creating the infrastructure - allowing for a quicker security and policy feedback loop for the cloud engineering team.
+
+This policy pack can also be [published to the Pulumi Service](https://www.pulumi.com/docs/get-started/crossguard/enforcing-a-policy-pack/) so that it will be enforced across your Organization.  
+
+```
+$ pulumi policy publish
+Obtaining policy metadata from policy plugin
+Compressing policy pack
+Uploading policy pack to Pulumi service
+Publishing "kubernetes" to "myorg"
+Published as version 1
+
+Permalink: https://app.pulumi.com/myorg/policypacks/kubernetes/1
+```
+
+For more details on working with Policy as Code in Pulumi, see the CrossGuard documentation at https://www.pulumi.com/docs/guides/crossguard/.
