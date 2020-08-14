@@ -11,10 +11,7 @@ The OPA integration implements the Pulumi plugin interface for policies. Unlike 
 implementing policy rules using [an SDK in a general purpose language](https://github.com/pulumi/pulumi-policy)
 this bridge lets you author Pulumi Crossguard policies using OPA and `.rego` syntax.
 
-## How to build and distribute
-
-The binary this repo builds is not intended to be run directly. It produces a plugin named `pulumi-policy-opa` which,
-when packaged with a set of OPA rules in the `rules/` directory, can be loaded by the Pulumi plugin system.
+## How to use OPA with Pulumi CrossGuard
 
 First, install the OPA policy analyzer plugin.
 
