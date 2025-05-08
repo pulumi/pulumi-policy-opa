@@ -16,33 +16,42 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
+	"github.com/pulumi/pulumi/pkg/util/logging"
+	pulumirpc "github.com/pulumi/pulumi/sdk/proto/go"
 	"os"
 
 	"github.com/pulumi/pulumi/pkg/util/cmdutil"
-	"github.com/pulumi/pulumi/pkg/util/contract"
 )
 
 func main() {
-	// Enable overriding the rules location and/or dumping plugin info.
-	flags := flag.NewFlagSet("tf-provider-flags", flag.ContinueOnError)
-	dumpInfo := flags.Bool("get-plugin-info", false, "dump plugin info as JSON to stdout")
-	contract.IgnoreError(flags.Parse(os.Args[1:]))
-	args := flags.Args()
 
-	pack, e, err := loadPolicyPack(args[1])
+	logging.InitLogging(false, 0, false)
+
+	rc, err := rpcCmd.NewRpcCmd(&rpcCmd.RpcCmdConfig{})
 	if err != nil {
-		cmdutil.ExitError(err.Error())
+		cmdutil.Exit(err)
 	}
 
-	if *dumpInfo {
+	var dumpInfo bool
+	rc.Flag.BoolVar(&dumpInfo, "get-plugin-info", false, "dump plugin info as JSON to stdout")
+
+	pack, e, err := loadPolicyPack(rpc.PluginPath)
+	if err != nil {
+		cmdutil.Exit(err)
+	}
+	rc.TracingName = pack.Name
+	rc.RootSpanName = pack.Name
+
+	if dumpInfo {
 		if err := json.NewEncoder(os.Stdout).Encode(pack); err != nil {
 			cmdutil.ExitError(err.Error())
 		}
 		os.Exit(0)
 	}
 
-	if err := Serve(pack, e, args); err != nil {
-		cmdutil.ExitError(err.Error())
-	}
+	rc.Run(func(srv *grpc.Server) error {
+		analyzer := NewAnalyzer(host, pack, e)
+		pulumirpc.RegisterAnalyzerServer(srv, analyzer)
+		return nil
+	}, func() {})
 }
