@@ -1,0 +1,12 @@
+{
+  "__name": "prod-database",
+  "type": "aws:rds/instance:Instance",
+  "engine": "postgres",
+  "instanceClass": "db.t3.medium",
+  "allocatedStorage": 100,
+  "storageEncrypted": true,
+  "publiclyAccessible": false,
+  "backupRetentionPeriod": 14,
+  "multiAz": true,
+  "deletionProtection": true
+}

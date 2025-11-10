@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,7 +30,7 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 			return errors.Wrapf(fileErr, "searching for policies in %s", dir)
 		} else if !info.IsDir() && filepath.Ext(path) == ".rego" {
 			// Read the program into memory so we can compile it below.
-			b, err := ioutil.ReadFile(path)
+			b, err := os.ReadFile(path)
 			if err != nil {
 				return errors.Wrapf(err, "reading policy %s", path)
 			}

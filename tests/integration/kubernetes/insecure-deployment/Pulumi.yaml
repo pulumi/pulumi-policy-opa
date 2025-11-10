@@ -1,0 +1,3 @@
+name: k8s-insecure-deployment
+runtime: nodejs
+description: Test program with insecure Kubernetes deployment (should fail policies)

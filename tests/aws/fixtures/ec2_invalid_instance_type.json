@@ -1,0 +1,6 @@
+{
+  "__name": "prod-web-server",
+  "type": "aws:ec2/instance:Instance",
+  "instanceType": "t2.micro",
+  "ami": "ami-12345678"
+}

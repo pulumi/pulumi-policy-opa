@@ -1,0 +1,3 @@
+name: k8s-secure-deployment
+runtime: nodejs
+description: Test program with secure Kubernetes deployment

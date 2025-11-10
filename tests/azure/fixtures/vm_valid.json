@@ -1,0 +1,25 @@
+{
+  "__name": "prod-vm",
+  "type": "azure-native:compute:VirtualMachine",
+  "hardwareProfile": {
+    "vmSize": "Standard_D2s_v3"
+  },
+  "storageProfile": {
+    "osDisk": {
+      "createOption": "FromImage",
+      "managedDisk": {
+        "storageAccountType": "Premium_LRS"
+      },
+      "encryptionSettings": {
+        "enabled": true
+      }
+    }
+  },
+  "networkProfile": {
+    "networkInterfaces": [
+      {
+        "id": "/subscriptions/xxx/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1"
+      }
+    ]
+  }
+}

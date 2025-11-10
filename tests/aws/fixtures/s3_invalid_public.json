@@ -1,0 +1,12 @@
+{
+  "__name": "public-bucket",
+  "type": "aws:s3/bucket:Bucket",
+  "acl": "public-read",
+  "serverSideEncryptionConfiguration": {
+    "rule": {
+      "applyServerSideEncryptionByDefault": {
+        "sseAlgorithm": "AES256"
+      }
+    }
+  }
+}

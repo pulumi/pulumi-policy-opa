@@ -3,126 +3,123 @@ package main
 import (
 	"context"
 
-	pbempty "github.com/golang/protobuf/ptypes/empty"
-	pbstruct "github.com/golang/protobuf/ptypes/struct"
-
-	"github.com/pulumi/pulumi/pkg/resource/provider"
-	pulumirpc "github.com/pulumi/pulumi/sdk/proto/go"
+	"github.com/blang/semver"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
 )
 
-const Version = "0.0.1" // TODO: load this from a linker-generated version.
+const VersionString = "0.0.1" // TODO: load this from a linker-generated version.
 
-// analyzer implements the gRPC interface needed to plug into Pulumi as a policy analyzer.
+// analyzer implements the Analyzer interface needed to plug into Pulumi as a policy analyzer.
 type analyzer struct {
-	host *provider.HostClient
 	pack *policyPack
 	e    *evaler
 }
 
-func NewAnalyzer(host *provider.HostClient, pack *policyPack, e *evaler) pulumirpc.AnalyzerServer {
+func NewAnalyzer(pack *policyPack, e *evaler) plugin.Analyzer {
 	return &analyzer{
-		host: host,
 		pack: pack,
 		e:    e,
 	}
 }
 
-func (a *analyzer) Analyze(ctx context.Context, req *pulumirpc.AnalyzeRequest) (*pulumirpc.AnalyzeResponse, error) {
-	var diagnostics []*pulumirpc.AnalyzeDiagnostic
+func (a *analyzer) Name() tokens.QName {
+	return tokens.QName(a.pack.Name)
+}
+
+func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, error) {
+	var diagnostics []plugin.AnalyzeDiagnostic
 
 	// Run the policy pack against this object's metadata.
 	// TODO: to attain rule compatibility with OPA rules written for, say, the Kubernetes Admission
-	//     Controller, there is a very different schem we would need to follow. It's possible we should
+	//     Controller, there is a very different schema we would need to follow. It's possible we should
 	//     make the schema translation pluggable and customizable for certain policy packs and/or providers.
-	obj := pbStructToGo(req.Properties)
-	results, err := a.e.evalPolicyPack(ctx, a.pack, obj)
+	obj := r.Properties.Mappable()
+	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj)
 	if err != nil {
-		return nil, err
+		return plugin.AnalyzeResponse{}, err
 	}
 
-	// Translate the policy results into the appropriate analyzer RPC data structures.
+	// Translate the policy results into the appropriate analyzer data structures.
 	for _, result := range results {
-		var level pulumirpc.EnforcementLevel
+		var level apitype.EnforcementLevel
 		if result.level == advisoryRule {
-			level = pulumirpc.EnforcementLevel_ADVISORY
+			level = apitype.Advisory
 		} else {
-			level = pulumirpc.EnforcementLevel_MANDATORY
+			level = apitype.Mandatory
 		}
-		diagnostics = append(diagnostics, &pulumirpc.AnalyzeDiagnostic{
+		diagnostics = append(diagnostics, plugin.AnalyzeDiagnostic{
 			PolicyName:        result.rule,
 			PolicyPackName:    result.pack,
-			PolicyPackVersion: Version,
+			PolicyPackVersion: VersionString,
 			Message:           result.msg,
-			Urn:               req.Urn,
+			URN:               r.URN,
 			EnforcementLevel:  level,
-			// TODO: Description, Tags, EnforcementLevel
 		})
 	}
 
-	return &pulumirpc.AnalyzeResponse{Diagnostics: diagnostics}, nil
+	return plugin.AnalyzeResponse{Diagnostics: diagnostics}, nil
 }
 
-func (a *analyzer) AnalyzeStack(ctx context.Context, req *pulumirpc.AnalyzeStackRequest) (*pulumirpc.AnalyzeResponse, error) {
+func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugin.AnalyzeResponse, error) {
 	// TODO: surface the complete set of resources to the OPA rule, perhaps as a different property.
 	//     We don't bother to re-run the rules here since we already analyzed all of them.
-	return &pulumirpc.AnalyzeResponse{}, nil
+	return plugin.AnalyzeResponse{}, nil
 }
 
-func (a *analyzer) GetAnalyzerInfo(ctx context.Context, req *pbempty.Empty) (*pulumirpc.AnalyzerInfo, error) {
-	var policies []*pulumirpc.PolicyInfo
+func (a *analyzer) Remediate(r plugin.AnalyzerResource) (plugin.RemediateResponse, error) {
+	// OPA analyzer does not support remediation
+	return plugin.RemediateResponse{}, nil
+}
+
+func (a *analyzer) GetAnalyzerInfo() (plugin.AnalyzerInfo, error) {
+	var policies []plugin.AnalyzerPolicyInfo
 	for _, pol := range a.pack.Policies {
-		policies = append(policies, &pulumirpc.PolicyInfo{
+		var enforcementLevel apitype.EnforcementLevel
+		if pol.Level == advisoryRule {
+			enforcementLevel = apitype.Advisory
+		} else {
+			enforcementLevel = apitype.Mandatory
+		}
+		policies = append(policies, plugin.AnalyzerPolicyInfo{
 			Name:             pol.Name,
 			DisplayName:      pol.DisplayName,
 			Description:      pol.Description,
 			Message:          pol.Message,
-			EnforcementLevel: pulumirpc.EnforcementLevel(pol.Level),
+			EnforcementLevel: enforcementLevel,
 		})
 	}
-	return &pulumirpc.AnalyzerInfo{
+	return plugin.AnalyzerInfo{
 		Name:        a.pack.Name,
 		DisplayName: a.pack.DisplayName,
 		Policies:    policies,
 	}, nil
 }
 
-func (a *analyzer) GetPluginInfo(ctx context.Context, req *pbempty.Empty) (*pulumirpc.PluginInfo, error) {
-	return &pulumirpc.PluginInfo{Version: Version}, nil
+func (a *analyzer) GetPluginInfo() (workspace.PluginInfo, error) {
+	version, err := semver.Parse(VersionString)
+	if err != nil {
+		return workspace.PluginInfo{}, err
+	}
+	return workspace.PluginInfo{
+		Version: &version,
+	}, nil
 }
 
-// pbStructToGo converts a Protobuf struct to a Go map.
-func pbStructToGo(s *pbstruct.Struct) map[string]interface{} {
-	if s == nil {
-		return nil
-	}
-
-	m := make(map[string]interface{})
-	for k, v := range s.Fields {
-		m[k] = pbValueToGo(v)
-	}
-	return m
+func (a *analyzer) Configure(policyConfig map[string]plugin.AnalyzerPolicyConfig) error {
+	// No configuration needed for now
+	return nil
 }
 
-// structValueToIface converts a Protobuf value to its Go equivalent.
-func pbValueToGo(v *pbstruct.Value) interface{} {
-	switch k := v.Kind.(type) {
-	case *pbstruct.Value_BoolValue:
-		return k.BoolValue
-	case *pbstruct.Value_ListValue:
-		var a []interface{}
-		for _, e := range k.ListValue.Values {
-			a = append(a, pbValueToGo(e))
-		}
-		return a
-	case *pbstruct.Value_NullValue:
-		return nil
-	case *pbstruct.Value_NumberValue:
-		return k.NumberValue
-	case *pbstruct.Value_StringValue:
-		return k.StringValue
-	case *pbstruct.Value_StructValue:
-		return pbStructToGo(k.StructValue)
-	default:
-		return nil
-	}
+func (a *analyzer) Cancel(ctx context.Context) error {
+	// No cancellation needed
+	return nil
 }
+
+func (a *analyzer) Close() error {
+	// No resources to close
+	return nil
+}
+

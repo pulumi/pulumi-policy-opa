@@ -1,0 +1,3 @@
+name: s3-secure-test
+runtime: nodejs
+description: Test program with secure S3 bucket configuration

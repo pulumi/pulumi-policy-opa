@@ -1,0 +1,11 @@
+{
+  "name": "s3-secure-test",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@types/node": "^18.0.0"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.0.0",
+    "@pulumi/aws": "^6.0.0"
+  }
+}

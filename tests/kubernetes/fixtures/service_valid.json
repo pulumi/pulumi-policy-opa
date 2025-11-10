@@ -1,0 +1,31 @@
+{
+  "kind": "Service",
+  "metadata": {
+    "name": "nginx-service",
+    "labels": {
+      "app.kubernetes.io/name": "nginx",
+      "app.kubernetes.io/instance": "nginx-prod",
+      "app.kubernetes.io/version": "1.21.0",
+      "app.kubernetes.io/component": "web-server",
+      "app.kubernetes.io/part-of": "web-app",
+      "app.kubernetes.io/managed-by": "pulumi",
+      "environment": "production"
+    },
+    "annotations": {
+      "owner": "platform-team"
+    }
+  },
+  "spec": {
+    "type": "ClusterIP",
+    "selector": {
+      "app": "nginx"
+    },
+    "ports": [
+      {
+        "protocol": "TCP",
+        "port": 80,
+        "targetPort": 80
+      }
+    ]
+  }
+}
