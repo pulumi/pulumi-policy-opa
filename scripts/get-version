@@ -14,7 +14,9 @@ fi
 
 # If we have an exact tag, just use it.
 if git describe --tags --exact-match "${COMMITISH}" >/dev/null 2>&1; then
-    echo -n "$(git describe --tags --exact-match "${COMMITISH}")"
+    TAG_VERSION=$(git describe --tags --exact-match "${COMMITISH}")
+    TAG_VERSION=${TAG_VERSION#v}
+    echo -n "${TAG_VERSION}"
     if [ ! -z "${DIRTY_TAG}" ]; then
         echo -n "+${DIRTY_TAG}"
     fi
@@ -35,12 +37,12 @@ fi
 
 # Strip off any pre-release tag we might have (e.g. from doing a -rc build)
 TAG=${TAG%%-*}
-
 MAJOR=$(cut -d. -f1 <<< "${TAG}")
+MAJOR=${MAJOR#v}
 MINOR=$(cut -d. -f2 <<< "${TAG}")
 PATCH=$(cut -d. -f3 <<< "${TAG}")
 
-if [ "${MAJOR}" = "v0" ]; then
+if [ "${MAJOR}" = "0" ]; then
     PATCH=$((${PATCH}+1))
 else
     MINOR=$((${MINOR}+1))

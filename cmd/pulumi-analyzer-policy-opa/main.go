@@ -15,42 +15,21 @@
 package main
 
 import (
-	"encoding/json"
-	"flag"
-	"fmt"
 	"os"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/cmdutil"
-	"github.com/pulumi/pulumi/sdk/v3/go/common/util/contract"
 )
 
 func main() {
-	// Enable overriding the rules location and/or dumping plugin info.
-	flags := flag.NewFlagSet("tf-provider-flags", flag.ContinueOnError)
-	version := flags.Bool("version", false, "print version information")
-	dumpInfo := flags.Bool("get-plugin-info", false, "dump plugin info as JSON to stdout")
-	contract.IgnoreError(flags.Parse(os.Args[1:]))
-	args := flags.Args()
+	args := os.Args[1:]
 
-	if *version {
-		fmt.Println(VersionString)
-		os.Exit(0)
+	if len(args) < 2 {
+		cmdutil.ExitError("missing required arguments: host and policy pack directory path")
 	}
 
-	if len(args) < 1 {
-		cmdutil.ExitError("missing required argument: policy pack directory path")
-	}
-
-	pack, e, err := loadPolicyPack(args[0])
+	pack, e, err := loadPolicyPack(args[1])
 	if err != nil {
 		cmdutil.ExitError(err.Error())
-	}
-
-	if *dumpInfo {
-		if err := json.NewEncoder(os.Stdout).Encode(pack); err != nil {
-			cmdutil.ExitError(err.Error())
-		}
-		os.Exit(0)
 	}
 
 	if err := Serve(pack, e, args); err != nil {
