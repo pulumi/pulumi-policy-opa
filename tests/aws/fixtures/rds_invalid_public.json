@@ -1,0 +1,10 @@
+{
+  "__name": "dev-database",
+  "type": "aws:rds/instance:Instance",
+  "engine": "postgres",
+  "instanceClass": "db.t3.micro",
+  "allocatedStorage": 20,
+  "storageEncrypted": true,
+  "publiclyAccessible": true,
+  "backupRetentionPeriod": 7
+}

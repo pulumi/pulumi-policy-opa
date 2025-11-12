@@ -1,0 +1,29 @@
+{
+  "__name": "web-nsg",
+  "type": "azure-native:network:NetworkSecurityGroup",
+  "location": "eastus",
+  "securityRules": [
+    {
+      "name": "allow-ssh",
+      "access": "Allow",
+      "direction": "Inbound",
+      "priority": 100,
+      "protocol": "Tcp",
+      "sourceAddressPrefix": "*",
+      "sourcePortRange": "*",
+      "destinationAddressPrefix": "*",
+      "destinationPortRange": "22"
+    },
+    {
+      "name": "allow-http",
+      "access": "Allow",
+      "direction": "Inbound",
+      "priority": 110,
+      "protocol": "Tcp",
+      "sourceAddressPrefix": "*",
+      "sourcePortRange": "*",
+      "destinationAddressPrefix": "*",
+      "destinationPortRange": "80"
+    }
+  ]
+}

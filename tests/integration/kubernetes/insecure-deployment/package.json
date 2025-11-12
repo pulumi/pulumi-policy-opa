@@ -1,0 +1,11 @@
+{
+  "name": "k8s-insecure-deployment",
+  "version": "1.0.0",
+  "devDependencies": {
+    "@types/node": "^18.0.0"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.0.0",
+    "@pulumi/kubernetes": "^4.0.0"
+  }
+}

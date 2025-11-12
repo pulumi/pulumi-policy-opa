@@ -1,13 +1,26 @@
+// Copyright 2025, Pulumi Corporation.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	"github.com/open-policy-agent/opa/ast"
+	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/pkg/errors"
 )
 
@@ -26,12 +39,16 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 
 	// Next gather up all the OPA rego files to run and prepare to compile them.
 	modules := make(map[string]string)
-	if err := filepath.Walk(dir, func(path string, info os.FileInfo, fileErr error) error {
+	if err := filepath.Walk(dir, func(
+		path string,
+		info os.FileInfo,
+		fileErr error,
+	) error {
 		if fileErr != nil {
 			return errors.Wrapf(fileErr, "searching for policies in %s", dir)
 		} else if !info.IsDir() && filepath.Ext(path) == ".rego" {
 			// Read the program into memory so we can compile it below.
-			b, err := ioutil.ReadFile(path)
+			b, err := os.ReadFile(path)
 			if err != nil {
 				return errors.Wrapf(err, "reading policy %s", path)
 			}
@@ -50,7 +67,11 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	}
 
 	// Compile all of the policy files so we can error out early if there are problems.
-	compiler, err := ast.CompileModules(modules)
+	compiler, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		ParserOptions: ast.ParserOptions{
+			RegoVersion: ast.RegoV0,
+		},
+	})
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "policy compilation failed")
 	}

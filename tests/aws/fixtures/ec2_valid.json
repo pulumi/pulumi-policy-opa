@@ -1,0 +1,11 @@
+{
+  "__name": "prod-web-server",
+  "type": "aws:ec2/instance:Instance",
+  "instanceType": "t3.medium",
+  "ami": "ami-12345678",
+  "monitoring": true,
+  "tags": {
+    "Environment": "production",
+    "Application": "web"
+  }
+}

@@ -1,0 +1,2 @@
+description: Kubernetes Security and Best Practices Policy Pack using OPA
+runtime: opa

@@ -1,0 +1,5 @@
+{
+  "__name": "unencrypted-bucket",
+  "type": "aws:s3/bucket:Bucket",
+  "acl": "private"
+}

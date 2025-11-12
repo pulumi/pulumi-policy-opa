@@ -1,0 +1,45 @@
+{
+  "kind": "Deployment",
+  "metadata": {
+    "name": "app-deployment",
+    "labels": {
+      "app.kubernetes.io/name": "myapp",
+      "app.kubernetes.io/instance": "myapp-dev",
+      "app.kubernetes.io/version": "1.0.0",
+      "app.kubernetes.io/component": "backend",
+      "app.kubernetes.io/part-of": "myapp",
+      "app.kubernetes.io/managed-by": "pulumi",
+      "environment": "development"
+    }
+  },
+  "spec": {
+    "replicas": 1,
+    "selector": {
+      "matchLabels": {
+        "app": "myapp"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "myapp"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "app",
+            "image": "myapp:1.0.0",
+            "securityContext": {
+              "runAsNonRoot": true,
+              "readOnlyRootFilesystem": true,
+              "capabilities": {
+                "drop": ["ALL"]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

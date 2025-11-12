@@ -1,0 +1,3 @@
+name: s3-insecure-test
+runtime: nodejs
+description: Test program with insecure S3 bucket configuration (should fail policies)

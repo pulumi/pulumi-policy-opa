@@ -1,0 +1,21 @@
+{
+  "__name": "secure-bucket",
+  "type": "aws:s3/bucket:Bucket",
+  "acl": "private",
+  "serverSideEncryptionConfiguration": {
+    "rule": {
+      "applyServerSideEncryptionByDefault": {
+        "sseAlgorithm": "AES256"
+      }
+    }
+  },
+  "versioning": {
+    "enabled": true
+  },
+  "loggings": [
+    {
+      "targetBucket": "logging-bucket",
+      "targetPrefix": "logs/"
+    }
+  ]
+}

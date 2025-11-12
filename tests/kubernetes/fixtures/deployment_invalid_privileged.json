@@ -1,0 +1,35 @@
+{
+  "kind": "Deployment",
+  "metadata": {
+    "name": "app-deployment",
+    "labels": {
+      "app": "myapp"
+    }
+  },
+  "spec": {
+    "replicas": 2,
+    "selector": {
+      "matchLabels": {
+        "app": "myapp"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "myapp"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "app",
+            "image": "myapp:latest",
+            "securityContext": {
+              "privileged": true
+            }
+          }
+        ]
+      }
+    }
+  }
+}

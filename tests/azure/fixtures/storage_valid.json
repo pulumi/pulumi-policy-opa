@@ -1,0 +1,19 @@
+{
+  "__name": "securestorage",
+  "type": "azure-native:storage:StorageAccount",
+  "enableHttpsTrafficOnly": true,
+  "minimumTlsVersion": "TLS1_2",
+  "allowBlobPublicAccess": false,
+  "encryption": {
+    "services": {
+      "blob": {
+        "enabled": true
+      },
+      "file": {
+        "enabled": true
+      }
+    },
+    "requireInfrastructureEncryption": true,
+    "keySource": "Microsoft.Storage"
+  }
+}

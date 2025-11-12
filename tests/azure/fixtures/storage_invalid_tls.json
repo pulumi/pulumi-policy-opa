@@ -1,0 +1,7 @@
+{
+  "__name": "oldstorage",
+  "type": "azure-native:storage:StorageAccount",
+  "enableHttpsTrafficOnly": true,
+  "minimumTlsVersion": "TLS1_0",
+  "allowBlobPublicAccess": false
+}
