@@ -4,12 +4,14 @@ include build/common.mk
 PROJECT          := github.com/pulumi/pulumi-policy-opa/cmd/pulumi-analyzer-policy-opa
 GOPKGS           := $(shell go list ./... | grep -v /vendor/)
 TESTPARALLELISM  := 10
+VERSION          := $(shell ./scripts/get-version)
+LDFLAGS          := -ldflags "-X main.VersionString=$(VERSION)"
 
 build::
-	go build ${PROJECT}
+	go build $(LDFLAGS) ${PROJECT}
 
 install::
-	go install ${PROJECT}
+	go install $(LDFLAGS) ${PROJECT}
 
 lint::
 	golangci-lint run

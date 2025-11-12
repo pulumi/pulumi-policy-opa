@@ -25,7 +25,8 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
 )
 
-const VersionString = "0.0.1" // TODO: load this from a linker-generated version.
+// VersionString is set via ldflags at build time using scripts/get-version.
+var VersionString = "0.0.1+dev"
 
 // analyzer implements the Analyzer interface needed to plug into Pulumi as a policy analyzer.
 type analyzer struct {
