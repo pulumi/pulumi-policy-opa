@@ -4,13 +4,13 @@ before:
 builds:
 - env:
   - CGO_ENABLED=0
-  - GO111MODULE=on
   goos:
     - darwin
     - windows
     - linux
   goarch:
     - amd64
+    - arm64
   binary: pulumi-analyzer-policy-opa
   main: ./cmd/pulumi-analyzer-policy-opa/
 archives:
