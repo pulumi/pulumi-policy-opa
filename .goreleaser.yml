@@ -1,3 +1,4 @@
+version: 2
 before:
   hooks:
     - go mod download
@@ -18,14 +19,14 @@ archives:
   name_template: "{{ .Binary }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
 blobs:
 - bucket: get.pulumi.com
-  folder: releases/plugins/
+  directory: releases/plugins/
   ids:
   - archive
   provider: s3
   region: us-west-2
 snapshot:
-  name_template: "{{ .Tag }}-SNAPSHOT"
+  version_template: "{{ .Tag }}-SNAPSHOT"
 changelog:
-  skip: true
+  disable: true
 release:
   prerelease: auto
