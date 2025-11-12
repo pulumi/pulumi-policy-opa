@@ -66,8 +66,13 @@ pulumi preview --policy-pack ./policies
 ### Prerequisites
 
 - **Pulumi CLI** (v3.0+): [Install Pulumi](https://www.pulumi.com/docs/get-started/install/)
-- **Go** (1.24+): [Install Go](https://golang.org/doc/install)
 - **OPA CLI** (optional, for testing): [Install OPA](https://www.openpolicyagent.org/docs/latest/#1-download-opa)
+
+Install the analyzer:
+
+```bash
+pulumi plugin install analyzer policy-opa
+```
 
 ---
 
