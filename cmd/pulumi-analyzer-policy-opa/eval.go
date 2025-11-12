@@ -18,8 +18,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/rego"
 	"github.com/pkg/errors"
 )
 
@@ -40,6 +40,7 @@ func (e *evaler) evalPolicyPack(
 			rego.Query(fmt.Sprintf("data.%s.%s", pack.Name, rule.Name)),
 			rego.Compiler(e.c),
 			rego.Input(input),
+			rego.SetRegoVersion(ast.RegoV0),
 		)
 
 		resultSet, err := robj.Eval(ctx)

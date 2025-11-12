@@ -15,14 +15,15 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/rego"
 )
 
 // TestSuite represents a collection of policy tests
@@ -120,7 +121,11 @@ func EvaluatePolicy(
 	input map[string]any,
 ) ([]any, error) {
 	// Compile modules
-	compiler, err := ast.CompileModules(modules)
+	compiler, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		ParserOptions: ast.ParserOptions{
+			RegoVersion: ast.RegoV0,
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -130,10 +135,11 @@ func EvaluatePolicy(
 		rego.Query("data."+packageName+".deny"),
 		rego.Compiler(compiler),
 		rego.Input(input),
+		rego.SetRegoVersion(ast.RegoV0),
 	)
 
 	// Evaluate
-	rs, err := query.Eval(nil)
+	rs, err := query.Eval(context.TODO())
 	if err != nil {
 		return nil, err
 	}

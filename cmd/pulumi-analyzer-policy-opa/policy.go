@@ -20,7 +20,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/open-policy-agent/opa/ast"
+	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/pkg/errors"
 )
 
@@ -67,7 +67,11 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	}
 
 	// Compile all of the policy files so we can error out early if there are problems.
-	compiler, err := ast.CompileModules(modules)
+	compiler, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		ParserOptions: ast.ParserOptions{
+			RegoVersion: ast.RegoV0,
+		},
+	})
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "policy compilation failed")
 	}

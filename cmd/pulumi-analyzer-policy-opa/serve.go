@@ -39,21 +39,21 @@ func Serve(
 	analyzerServer := plugin.NewAnalyzerServer(analyzer)
 
 	// Create a new gRPC server and listen for and serve incoming connections.
-	port, done, err := rpcutil.Serve(0, nil, []func(*grpc.Server) error{
-		func(srv *grpc.Server) error {
+	handle, err := rpcutil.ServeWithOptions(rpcutil.ServeOptions{
+		Init: func(srv *grpc.Server) error {
 			pulumirpc.RegisterAnalyzerServer(srv, analyzerServer)
 			return nil
 		},
-	}, nil)
+	})
 	if err != nil {
 		return errors.Wrapf(err, "fatal: could not serve RPC")
 	}
 
 	// The plugin protocol requires that we now write out the port we've chosen to listen on.
-	fmt.Printf("%d\n", port)
+	fmt.Printf("%d\n", handle.Port)
 
 	// Finally, wait for the server to stop serving before returning.
-	if err := <-done; err != nil {
+	if err := <-handle.Done; err != nil {
 		return errors.Wrapf(err, "fatal: plugin exit")
 	}
 
