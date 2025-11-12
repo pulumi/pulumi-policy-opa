@@ -37,7 +37,11 @@ func main() {
 		os.Exit(0)
 	}
 
-	pack, e, err := loadPolicyPack(args[1])
+	if len(args) < 1 {
+		cmdutil.ExitError("missing required argument: policy pack directory path")
+	}
+
+	pack, e, err := loadPolicyPack(args[0])
 	if err != nil {
 		cmdutil.ExitError(err.Error())
 	}
