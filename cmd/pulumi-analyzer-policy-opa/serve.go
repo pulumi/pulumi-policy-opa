@@ -1,4 +1,4 @@
-// Copyright 2019, Pulumi Corporation.
+// Copyright 2025, Pulumi Corporation.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,11 @@ import (
 
 // Serve fires up a Pulumi analyzer provider listening to inbound gRPC traffic,
 // and translates calls from Pulumi into actions against the OPA rules in packInfo.
-func Serve(pack *policyPack, e *evaler, args []string) error {
+func Serve(
+	pack *policyPack,
+	e *evaler,
+	args []string,
+) error {
 	// Create an analyzer implementation
 	analyzer := NewAnalyzer(pack, e)
 

@@ -1,3 +1,17 @@
+// Copyright 2025, Pulumi Corporation.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package tests
 
 import (
@@ -22,7 +36,7 @@ type TestSuite struct {
 // TestCase represents a single test case
 type TestCase struct {
 	Name          string
-	Fixture       map[string]interface{}
+	Fixture       map[string]any
 	ShouldViolate bool
 }
 
@@ -51,13 +65,13 @@ func GetTestSuites() []TestSuite {
 }
 
 // LoadFixture loads a JSON fixture file
-func LoadFixture(path string) (map[string]interface{}, error) {
+func LoadFixture(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var fixture map[string]interface{}
+	var fixture map[string]any
 	if err := json.Unmarshal(data, &fixture); err != nil {
 		return nil, err
 	}
@@ -69,7 +83,11 @@ func LoadFixture(path string) (map[string]interface{}, error) {
 func LoadPolicies(dir string) (map[string]string, error) {
 	modules := make(map[string]string)
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dir, func(
+		path string,
+		info os.FileInfo,
+		err error,
+	) error {
 		if err != nil {
 			return err
 		}
@@ -96,7 +114,11 @@ func LoadPolicies(dir string) (map[string]string, error) {
 }
 
 // EvaluatePolicy evaluates a policy against input data
-func EvaluatePolicy(modules map[string]string, packageName string, input map[string]interface{}) ([]interface{}, error) {
+func EvaluatePolicy(
+	modules map[string]string,
+	packageName string,
+	input map[string]any,
+) ([]any, error) {
 	// Compile modules
 	compiler, err := ast.CompileModules(modules)
 	if err != nil {
@@ -118,12 +140,12 @@ func EvaluatePolicy(modules map[string]string, packageName string, input map[str
 
 	// Extract violations
 	if len(rs) > 0 && len(rs[0].Expressions) > 0 {
-		if violations, ok := rs[0].Expressions[0].Value.([]interface{}); ok {
+		if violations, ok := rs[0].Expressions[0].Value.([]any); ok {
 			return violations, nil
 		}
 	}
 
-	return []interface{}{}, nil
+	return []any{}, nil
 }
 
 // TestAWSPolicies tests AWS policies
@@ -163,7 +185,10 @@ func TestKubernetesPolicies(t *testing.T) {
 }
 
 // runTestSuite runs all tests for a test suite
-func runTestSuite(t *testing.T, suite TestSuite) {
+func runTestSuite(
+	t *testing.T,
+	suite TestSuite,
+) {
 	t.Run(suite.Provider, func(t *testing.T) {
 		// Load policies
 		modules, err := LoadPolicies(suite.PolicyDir)
