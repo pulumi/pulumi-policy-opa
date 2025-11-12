@@ -17,6 +17,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/cmdutil"
@@ -26,9 +27,15 @@ import (
 func main() {
 	// Enable overriding the rules location and/or dumping plugin info.
 	flags := flag.NewFlagSet("tf-provider-flags", flag.ContinueOnError)
+	version := flags.Bool("version", false, "print version information")
 	dumpInfo := flags.Bool("get-plugin-info", false, "dump plugin info as JSON to stdout")
 	contract.IgnoreError(flags.Parse(os.Args[1:]))
 	args := flags.Args()
+
+	if *version {
+		fmt.Println(VersionString)
+		os.Exit(0)
+	}
 
 	pack, e, err := loadPolicyPack(args[1])
 	if err != nil {
