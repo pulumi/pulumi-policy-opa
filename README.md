@@ -83,6 +83,45 @@ go build -o pulumi-analyzer-policy-opa ./cmd/pulumi-analyzer-policy-opa
 ./pulumi-analyzer-policy-opa --version
 ```
 
+### CLI Commands
+
+The analyzer supports the following command-line options:
+
+#### `--version`
+Display version information:
+```bash
+./pulumi-analyzer-policy-opa --version
+```
+
+#### `--get-plugin-info <policy-pack-path>`
+Display plugin information as JSON, including the policy pack name and all available policies:
+
+```bash
+./pulumi-analyzer-policy-opa --get-plugin-info <policy-pack-path>
+```
+
+**Example:**
+```bash
+./pulumi-analyzer-policy-opa --get-plugin-info examples/policy-kubernetes
+```
+
+**Output:**
+```json
+{
+  "name":"kubernetes",
+  "displayName":"",
+  "policies":[
+    {"name":"warn","displayName":"kubernetes","description":"","message":"","enforcementLevel":0},
+    {"name":"deny","displayName":"kubernetes","description":"","message":"","enforcementLevel":1}
+  ]
+}
+```
+
+Where:
+- `name` - The package name from the policy files
+- `policies` - Array of all policies found in the pack
+- `enforcementLevel` - `0` for advisory (warnings), `1` for mandatory (denials)
+
 ---
 
 ## Quick Start
