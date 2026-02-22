@@ -31,10 +31,14 @@ func (e *evaler) evalPolicyPack(
 	ctx context.Context,
 	pack *policyPack,
 	input any,
+	scope policyScope,
 ) ([]evalPolicyResult, error) {
 	var results []evalPolicyResult
 
 	for _, rule := range pack.Policies {
+		if rule.Scope != scope {
+			continue // skip rules not matching requested scope
+		}
 		// Build a rego object that can be evaluated.
 		robj := rego.New(
 			rego.Query(fmt.Sprintf("data.%s.%s", pack.Name, rule.Name)),
@@ -52,10 +56,14 @@ func (e *evaler) evalPolicyPack(
 			for _, expr := range result.Expressions {
 				if ae, ok := expr.Value.([]any); ok && len(ae) > 0 {
 					for _, v := range ae {
+						msg, ok := v.(string)
+						if !ok {
+							msg = fmt.Sprintf("%v", v)
+						}
 						results = append(results, evalPolicyResult{
 							pack:  pack.Name,
 							rule:  rule.Name,
-							msg:   fmt.Sprintf("%v", v),
+							msg:   msg,
 							level: rule.Level,
 						})
 					}

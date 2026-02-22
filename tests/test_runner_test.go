@@ -41,7 +41,18 @@ type TestCase struct {
 	ShouldViolate bool
 }
 
-// GetTestSuites returns all test suites
+// StackTestSuite represents a collection of stack-level policy tests.
+// Stack fixtures contain {"resources": [...]} instead of a single resource.
+type StackTestSuite struct {
+	Provider    string
+	PolicyDir   string
+	FixtureDir  string
+	PackageName string
+	// RuleNames lists the stack-level rule names to evaluate (e.g., stack_deny_too_many_buckets).
+	RuleNames []string
+}
+
+// GetTestSuites returns all resource-level test suites
 func GetTestSuites() []TestSuite {
 	return []TestSuite{
 		{
@@ -67,6 +78,23 @@ func GetTestSuites() []TestSuite {
 			PolicyDir:   "metadata/policies",
 			FixtureDir:  "metadata/fixtures",
 			PackageName: "metadata",
+		},
+	}
+}
+
+// GetStackTestSuites returns all stack-level test suites
+func GetStackTestSuites() []StackTestSuite {
+	return []StackTestSuite{
+		{
+			Provider:    "Stack",
+			PolicyDir:   "stack/policies",
+			FixtureDir:  "stack/fixtures",
+			PackageName: "stack",
+			RuleNames: []string{
+				"stack_deny_too_many_buckets",
+				"stack_deny_unencrypted_buckets",
+				"stack_warn_orphan_security_groups",
+			},
 		},
 	}
 }
@@ -160,6 +188,49 @@ func EvaluatePolicy(
 	return []any{}, nil
 }
 
+// EvaluateStackPolicy evaluates all stack-level rules against a stack input.
+// It queries each rule name and aggregates all violations.
+func EvaluateStackPolicy(
+	modules map[string]string,
+	packageName string,
+	ruleNames []string,
+	input map[string]any,
+) ([]any, error) {
+	// Compile modules
+	compiler, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		ParserOptions: ast.ParserOptions{
+			RegoVersion: ast.RegoV0,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var allViolations []any
+
+	for _, ruleName := range ruleNames {
+		query := rego.New(
+			rego.Query("data."+packageName+"."+ruleName),
+			rego.Compiler(compiler),
+			rego.Input(input),
+			rego.SetRegoVersion(ast.RegoV0),
+		)
+
+		rs, err := query.Eval(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+
+		if len(rs) > 0 && len(rs[0].Expressions) > 0 {
+			if violations, ok := rs[0].Expressions[0].Value.([]any); ok {
+				allViolations = append(allViolations, violations...)
+			}
+		}
+	}
+
+	return allViolations, nil
+}
+
 // TestAWSPolicies tests AWS policies
 func TestAWSPolicies(t *testing.T) {
 	suite := TestSuite{
@@ -206,6 +277,78 @@ func TestMetadataPolicies(t *testing.T) {
 	}
 
 	runTestSuite(t, suite)
+}
+
+// TestStackPolicies tests stack-level policies
+func TestStackPolicies(t *testing.T) {
+	suites := GetStackTestSuites()
+
+	for _, suite := range suites {
+		runStackTestSuite(t, suite)
+	}
+}
+
+// runStackTestSuite runs all tests for a stack test suite
+func runStackTestSuite(
+	t *testing.T,
+	suite StackTestSuite,
+) {
+	t.Run(suite.Provider, func(t *testing.T) {
+		// Load policies
+		modules, err := LoadPolicies(suite.PolicyDir)
+		if err != nil {
+			t.Fatalf("Failed to load policies: %v", err)
+		}
+
+		if len(modules) == 0 {
+			t.Skipf("No policies found in %s", suite.PolicyDir)
+		}
+
+		// Find all fixture files
+		fixtures, err := filepath.Glob(filepath.Join(suite.FixtureDir, "*.json"))
+		if err != nil {
+			t.Fatalf("Failed to find fixtures: %v", err)
+		}
+
+		if len(fixtures) == 0 {
+			t.Skipf("No fixtures found in %s", suite.FixtureDir)
+		}
+
+		// Test each fixture
+		for _, fixturePath := range fixtures {
+			filename := filepath.Base(fixturePath)
+			shouldViolate := strings.Contains(filename, "invalid")
+
+			t.Run(filename, func(t *testing.T) {
+				// Load fixture (stack fixtures are {"resources": [...]})
+				fixture, err := LoadFixture(fixturePath)
+				if err != nil {
+					t.Fatalf("Failed to load fixture: %v", err)
+				}
+
+				// Evaluate stack policy
+				violations, err := EvaluateStackPolicy(
+					modules, suite.PackageName, suite.RuleNames, fixture)
+				if err != nil {
+					t.Fatalf("Stack policy evaluation failed: %v", err)
+				}
+
+				hasViolations := len(violations) > 0
+
+				// Check expectations
+				if shouldViolate && !hasViolations {
+					t.Errorf("Expected violations for %s but got none", filename)
+				} else if !shouldViolate && hasViolations {
+					t.Errorf("Expected no violations for %s but got: %v", filename, violations)
+				}
+
+				// Log violations for debugging
+				if hasViolations {
+					t.Logf("Violations found: %v", violations)
+				}
+			})
+		}
+	})
 }
 
 // runTestSuite runs all tests for a test suite

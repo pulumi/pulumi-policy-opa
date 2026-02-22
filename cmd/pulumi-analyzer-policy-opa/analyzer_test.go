@@ -43,6 +43,21 @@ func makeResource() plugin.AnalyzerResource {
 	}
 }
 
+// makeStackResource is a helper that creates an AnalyzerStackResource with sensible defaults.
+func makeStackResource(name, resType, urn string) plugin.AnalyzerStackResource {
+	return plugin.AnalyzerStackResource{
+		AnalyzerResource: plugin.AnalyzerResource{
+			URN:  resource.URN(urn),
+			Type: tokens.Type(resType),
+			Name: name,
+			Properties: resource.NewPropertyMapFromMap(map[string]any{
+				"acl": "private",
+			}),
+			Options: plugin.AnalyzerResourceOptions{},
+		},
+	}
+}
+
 // TestBuildInput_IncludesProperties verifies that resource properties appear at the
 // top level of the input map.
 func TestBuildInput_IncludesProperties(t *testing.T) {
@@ -446,5 +461,159 @@ func TestBuildInput_EmptyProperties(t *testing.T) {
 	}
 	if input["options"] == nil {
 		t.Error("expected options field to be present")
+	}
+}
+
+// --- Stack input tests ---
+
+// TestBuildStackInput_BasicResources verifies that buildStackOPAInput creates a
+// resources array with enriched fields for each resource.
+func TestBuildStackInput_BasicResources(t *testing.T) {
+	resources := []plugin.AnalyzerStackResource{
+		makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
+		makeStackResource("bucket-2", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
+	}
+
+	input := buildStackOPAInput(resources)
+
+	resList, ok := input["resources"].([]map[string]any)
+	if !ok {
+		t.Fatal("expected input[\"resources\"] to be []map[string]any")
+	}
+	if len(resList) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(resList))
+	}
+
+	// Verify enriched fields on first resource.
+	if resList[0]["__name"] != "bucket-1" {
+		t.Errorf("expected __name = bucket-1, got %v", resList[0]["__name"])
+	}
+	if resList[0]["type"] != "aws:s3/bucket:Bucket" {
+		t.Errorf("expected type = aws:s3/bucket:Bucket, got %v", resList[0]["type"])
+	}
+	if resList[0]["urn"] != "urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1" {
+		t.Errorf("expected correct urn, got %v", resList[0]["urn"])
+	}
+	if resList[0]["acl"] != "private" {
+		t.Errorf("expected acl = private, got %v", resList[0]["acl"])
+	}
+
+	// Verify second resource.
+	if resList[1]["__name"] != "bucket-2" {
+		t.Errorf("expected __name = bucket-2, got %v", resList[1]["__name"])
+	}
+}
+
+// TestBuildStackInput_IncludesDependencies verifies that resource dependencies
+// are included as string arrays.
+func TestBuildStackInput_IncludesDependencies(t *testing.T) {
+	sr := makeStackResource("my-instance", "aws:ec2/instance:Instance",
+		"urn:pulumi:stack::proj::aws:ec2/instance:Instance::my-instance")
+	sr.Dependencies = []resource.URN{
+		resource.URN("urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg"),
+		resource.URN("urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet"),
+	}
+
+	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
+
+	resList := input["resources"].([]map[string]any)
+	deps, ok := resList[0]["dependencies"].([]string)
+	if !ok {
+		t.Fatal("expected dependencies to be []string")
+	}
+	if len(deps) != 2 {
+		t.Fatalf("expected 2 dependencies, got %d", len(deps))
+	}
+	if deps[0] != "urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg" {
+		t.Errorf("unexpected dependency[0]: %s", deps[0])
+	}
+	if deps[1] != "urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet" {
+		t.Errorf("unexpected dependency[1]: %s", deps[1])
+	}
+}
+
+// TestBuildStackInput_IncludesPropertyDependencies verifies that per-property
+// dependencies are included as map[string][]string.
+func TestBuildStackInput_IncludesPropertyDependencies(t *testing.T) {
+	sr := makeStackResource("my-instance", "aws:ec2/instance:Instance",
+		"urn:pulumi:stack::proj::aws:ec2/instance:Instance::my-instance")
+	sr.PropertyDependencies = map[resource.PropertyKey][]resource.URN{
+		resource.PropertyKey("securityGroups"): {
+			resource.URN("urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::sg-1"),
+		},
+		resource.PropertyKey("subnetId"): {
+			resource.URN("urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::subnet-1"),
+		},
+	}
+
+	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
+
+	resList := input["resources"].([]map[string]any)
+	propDeps, ok := resList[0]["propertyDependencies"].(map[string][]string)
+	if !ok {
+		t.Fatal("expected propertyDependencies to be map[string][]string")
+	}
+	if len(propDeps) != 2 {
+		t.Fatalf("expected 2 property dependency entries, got %d", len(propDeps))
+	}
+
+	sgDeps, ok := propDeps["securityGroups"]
+	if !ok || len(sgDeps) != 1 {
+		t.Fatalf("expected 1 securityGroups dependency, got %v", sgDeps)
+	}
+	if sgDeps[0] != "urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::sg-1" {
+		t.Errorf("unexpected securityGroups dependency: %s", sgDeps[0])
+	}
+}
+
+// TestBuildStackInput_EmptyResources verifies that an empty slice produces an
+// input with an empty (non-nil) resources array so that OPA receives [] not null.
+func TestBuildStackInput_EmptyResources(t *testing.T) {
+	input := buildStackOPAInput([]plugin.AnalyzerStackResource{})
+
+	resList, ok := input["resources"].([]map[string]any)
+	if !ok {
+		t.Fatal("expected input[\"resources\"] to be []map[string]any, not nil")
+	}
+	if len(resList) != 0 {
+		t.Errorf("expected 0 resources, got %d", len(resList))
+	}
+}
+
+// TestBuildStackInput_ParentOverride verifies that AnalyzerStackResource.Parent
+// overrides Options.Parent when non-empty.
+func TestBuildStackInput_ParentOverride(t *testing.T) {
+	sr := makeStackResource("child", "aws:s3/bucket:Bucket",
+		"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::child")
+	sr.Options.Parent = resource.URN("urn:pulumi:stack::proj::type::options-parent")
+	sr.Parent = resource.URN("urn:pulumi:stack::proj::type::stack-parent")
+
+	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
+
+	resList := input["resources"].([]map[string]any)
+	opts := resList[0]["options"].(map[string]any)
+	if opts["parent"] != "urn:pulumi:stack::proj::type::stack-parent" {
+		t.Errorf("expected parent to be overridden to stack-parent, got %v", opts["parent"])
+	}
+}
+
+// TestBuildStackInput_NilDependencies verifies that nil Dependencies and
+// PropertyDependencies result in those fields being absent from the output.
+func TestBuildStackInput_NilDependencies(t *testing.T) {
+	sr := makeStackResource("my-bucket", "aws:s3/bucket:Bucket",
+		"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::my-bucket")
+	sr.Dependencies = nil
+	sr.PropertyDependencies = nil
+
+	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
+
+	resList := input["resources"].([]map[string]any)
+	if _, exists := resList[0]["dependencies"]; exists {
+		t.Error("expected dependencies to be absent when nil")
+	}
+	if _, exists := resList[0]["propertyDependencies"]; exists {
+		t.Error("expected propertyDependencies to be absent when nil")
 	}
 }

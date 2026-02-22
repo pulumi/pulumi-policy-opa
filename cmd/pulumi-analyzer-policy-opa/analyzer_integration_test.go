@@ -247,7 +247,7 @@ func compilePoliciesFromSource(modules map[string]string) (*policyPack, *evaler,
 	var policies []*policyRule
 	existing := make(map[string]bool)
 
-	for _, module := range compiler.Modules {
+	for name, module := range compiler.Modules {
 		pkg := module.Package.String()
 		if len(pkg) > len("package ") {
 			pkg = pkg[len("package "):]
@@ -259,18 +259,29 @@ func compilePoliciesFromSource(modules map[string]string) (*policyPack, *evaler,
 		for _, rule := range module.Rules {
 			ruleName := rule.Head.Name.String()
 			var level enforcementLevel
-			if denyRulePrefix.MatchString(ruleName) {
+			var scope policyScope
+			if stackDenyRulePrefix.MatchString(ruleName) {
 				level = mandatoryRule
+				scope = stackScope
+			} else if stackWarnRulePrefix.MatchString(ruleName) {
+				level = advisoryRule
+				scope = stackScope
+			} else if denyRulePrefix.MatchString(ruleName) {
+				level = mandatoryRule
+				scope = resourceScope
 			} else if warnRulePrefix.MatchString(ruleName) {
 				level = advisoryRule
+				scope = resourceScope
 			} else {
 				continue
 			}
 			if !existing[ruleName] {
 				existing[ruleName] = true
 				policies = append(policies, &policyRule{
-					Name:  ruleName,
-					Level: level,
+					Name:        ruleName,
+					DisplayName: name,
+					Level:       level,
+					Scope:       scope,
 				})
 			}
 		}
@@ -282,4 +293,383 @@ func compilePoliciesFromSource(modules map[string]string) (*policyPack, *evaler,
 	}
 	e := &evaler{c: compiler}
 	return pack, e, nil
+}
+
+// --- Stack-level integration tests ---
+
+// TestAnalyzer_AnalyzeStack_BasicViolation tests that AnalyzeStack returns
+// diagnostics when a stack_deny rule is violated.
+func TestAnalyzer_AnalyzeStack_BasicViolation(t *testing.T) {
+	regoSource := `
+package test_stack
+
+stack_deny[msg] {
+    buckets := [r | r := input.resources[_]; r.type == "aws:s3/bucket:Bucket"]
+    count(buckets) > 2
+    msg := sprintf("Too many S3 buckets: %d (max 2)", [count(buckets)])
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"stack_check": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	resources := []plugin.AnalyzerStackResource{
+		makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
+		makeStackResource("bucket-2", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
+		makeStackResource("bucket-3", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-3"),
+	}
+
+	resp, err := a.AnalyzeStack(resources)
+	if err != nil {
+		t.Fatalf("AnalyzeStack returned error: %v", err)
+	}
+	if len(resp.Diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(resp.Diagnostics), resp.Diagnostics)
+	}
+	if resp.Diagnostics[0].EnforcementLevel != apitype.Mandatory {
+		t.Errorf("expected Mandatory enforcement, got %v", resp.Diagnostics[0].EnforcementLevel)
+	}
+	if resp.Diagnostics[0].Message != "Too many S3 buckets: 3 (max 2)" {
+		t.Errorf("unexpected message: %s", resp.Diagnostics[0].Message)
+	}
+}
+
+// TestAnalyzer_AnalyzeStack_NoViolation tests that AnalyzeStack returns no
+// diagnostics when all stack rules pass.
+func TestAnalyzer_AnalyzeStack_NoViolation(t *testing.T) {
+	regoSource := `
+package test_stack
+
+stack_deny[msg] {
+    buckets := [r | r := input.resources[_]; r.type == "aws:s3/bucket:Bucket"]
+    count(buckets) > 5
+    msg := "too many buckets"
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"stack_check": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	resources := []plugin.AnalyzerStackResource{
+		makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
+		makeStackResource("bucket-2", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
+	}
+
+	resp, err := a.AnalyzeStack(resources)
+	if err != nil {
+		t.Fatalf("AnalyzeStack returned error: %v", err)
+	}
+	if len(resp.Diagnostics) != 0 {
+		t.Errorf("expected 0 diagnostics, got %d: %v", len(resp.Diagnostics), resp.Diagnostics)
+	}
+}
+
+// TestAnalyzer_AnalyzeStack_NoStackRules tests that AnalyzeStack short-circuits
+// when the policy pack has no stack-level rules.
+func TestAnalyzer_AnalyzeStack_NoStackRules(t *testing.T) {
+	regoSource := `
+package test_resource_only
+
+deny[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"resource_check": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	resources := []plugin.AnalyzerStackResource{
+		makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
+	}
+
+	resp, err := a.AnalyzeStack(resources)
+	if err != nil {
+		t.Fatalf("AnalyzeStack returned error: %v", err)
+	}
+	if len(resp.Diagnostics) != 0 {
+		t.Errorf("expected 0 diagnostics (short-circuit), got %d", len(resp.Diagnostics))
+	}
+}
+
+// TestAnalyzer_AnalyzeStack_MixedRules tests that Analyze() and AnalyzeStack()
+// each only evaluate their scoped rules when both exist.
+func TestAnalyzer_AnalyzeStack_MixedRules(t *testing.T) {
+	regoSource := `
+package test_mixed
+
+deny[msg] {
+    input.acl == "public-read"
+    msg := "resource: public ACL not allowed"
+}
+
+stack_deny[msg] {
+    buckets := [r | r := input.resources[_]; r.type == "aws:s3/bucket:Bucket"]
+    count(buckets) > 1
+    msg := "stack: too many buckets"
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"mixed": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	// Analyze() should only fire the resource-level deny rule.
+	analyzeResp, err := a.Analyze(plugin.AnalyzerResource{
+		URN:  resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bad-bucket"),
+		Type: tokens.Type("aws:s3/bucket:Bucket"),
+		Name: "bad-bucket",
+		Properties: resource.NewPropertyMapFromMap(map[string]any{
+			"acl": "public-read",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+	if len(analyzeResp.Diagnostics) != 1 {
+		t.Fatalf("Analyze: expected 1 diagnostic, got %d", len(analyzeResp.Diagnostics))
+	}
+	if analyzeResp.Diagnostics[0].Message != "resource: public ACL not allowed" {
+		t.Errorf("Analyze: unexpected message: %s", analyzeResp.Diagnostics[0].Message)
+	}
+
+	// AnalyzeStack() should only fire the stack-level deny rule.
+	stackResources := []plugin.AnalyzerStackResource{
+		makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
+		makeStackResource("bucket-2", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
+	}
+
+	stackResp, err := a.AnalyzeStack(stackResources)
+	if err != nil {
+		t.Fatalf("AnalyzeStack returned error: %v", err)
+	}
+	if len(stackResp.Diagnostics) != 1 {
+		t.Fatalf("AnalyzeStack: expected 1 diagnostic, got %d", len(stackResp.Diagnostics))
+	}
+	if stackResp.Diagnostics[0].Message != "stack: too many buckets" {
+		t.Errorf("AnalyzeStack: unexpected message: %s", stackResp.Diagnostics[0].Message)
+	}
+}
+
+// TestAnalyzer_AnalyzeStack_WarnLevel tests that stack_warn rules produce
+// diagnostics with Advisory enforcement level.
+func TestAnalyzer_AnalyzeStack_WarnLevel(t *testing.T) {
+	regoSource := `
+package test_warn
+
+stack_warn[msg] {
+    count(input.resources) > 1
+    msg := "consider reducing resource count"
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"warn_check": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	resources := []plugin.AnalyzerStackResource{
+		makeStackResource("r1", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::r1"),
+		makeStackResource("r2", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::r2"),
+	}
+
+	resp, err := a.AnalyzeStack(resources)
+	if err != nil {
+		t.Fatalf("AnalyzeStack returned error: %v", err)
+	}
+	if len(resp.Diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d", len(resp.Diagnostics))
+	}
+	if resp.Diagnostics[0].EnforcementLevel != apitype.Advisory {
+		t.Errorf("expected Advisory enforcement, got %v", resp.Diagnostics[0].EnforcementLevel)
+	}
+}
+
+// TestAnalyzer_Analyze_IgnoresStackRules tests that Analyze() does not evaluate
+// stack-level rules.
+func TestAnalyzer_Analyze_IgnoresStackRules(t *testing.T) {
+	regoSource := `
+package test_ignore
+
+stack_deny[msg] {
+    msg := "this should never fire from Analyze"
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"stack_only": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	resp, err := a.Analyze(plugin.AnalyzerResource{
+		URN:  resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket"),
+		Type: tokens.Type("aws:s3/bucket:Bucket"),
+		Name: "bucket",
+		Properties: resource.NewPropertyMapFromMap(map[string]any{
+			"acl": "private",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Analyze returned error: %v", err)
+	}
+	if len(resp.Diagnostics) != 0 {
+		t.Errorf("expected 0 diagnostics (stack rules ignored), got %d: %v",
+			len(resp.Diagnostics), resp.Diagnostics)
+	}
+}
+
+// TestAnalyzer_AnalyzeStack_BackwardCompatible tests that AnalyzeStack works
+// correctly with a policy pack that only has resource-level rules.
+func TestAnalyzer_AnalyzeStack_BackwardCompatible(t *testing.T) {
+	regoSource := `
+package test_compat
+
+deny[msg] {
+    input.acl == "public-read"
+    msg := "public-read ACL is not allowed"
+}
+
+warn[msg] {
+    not input.tags
+    msg := "resource should have tags"
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"compat_check": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	resources := []plugin.AnalyzerStackResource{
+		makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
+	}
+
+	resp, err := a.AnalyzeStack(resources)
+	if err != nil {
+		t.Fatalf("AnalyzeStack returned error: %v", err)
+	}
+	if len(resp.Diagnostics) != 0 {
+		t.Errorf("expected 0 diagnostics (resource-only pack), got %d: %v",
+			len(resp.Diagnostics), resp.Diagnostics)
+	}
+}
+
+// TestAnalyzer_GetAnalyzerInfo_ReportsPolicyTypes tests that GetAnalyzerInfo
+// correctly reports AnalyzerPolicyTypeResource and AnalyzerPolicyTypeStack.
+func TestAnalyzer_GetAnalyzerInfo_ReportsPolicyTypes(t *testing.T) {
+	regoSource := `
+package test_types
+
+deny[msg] {
+    msg := "resource rule"
+}
+
+stack_deny[msg] {
+    msg := "stack rule"
+}
+
+warn[msg] {
+    msg := "resource warning"
+}
+
+stack_warn[msg] {
+    msg := "stack warning"
+}
+`
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"types": regoSource,
+	})
+	if err != nil {
+		t.Fatalf("failed to compile policy: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	info, err := a.GetAnalyzerInfo()
+	if err != nil {
+		t.Fatalf("GetAnalyzerInfo returned error: %v", err)
+	}
+
+	if len(info.Policies) != 4 {
+		t.Fatalf("expected 4 policies, got %d", len(info.Policies))
+	}
+
+	// Build a map for easy lookup.
+	policyMap := make(map[string]plugin.AnalyzerPolicyInfo)
+	for _, p := range info.Policies {
+		policyMap[p.Name] = p
+	}
+
+	// Resource-level rules should be AnalyzerPolicyTypeResource.
+	if p, ok := policyMap["deny"]; ok {
+		if p.Type != plugin.AnalyzerPolicyTypeResource {
+			t.Errorf("deny: expected AnalyzerPolicyTypeResource, got %v", p.Type)
+		}
+	} else {
+		t.Error("deny rule not found in policy info")
+	}
+
+	if p, ok := policyMap["warn"]; ok {
+		if p.Type != plugin.AnalyzerPolicyTypeResource {
+			t.Errorf("warn: expected AnalyzerPolicyTypeResource, got %v", p.Type)
+		}
+	} else {
+		t.Error("warn rule not found in policy info")
+	}
+
+	// Stack-level rules should be AnalyzerPolicyTypeStack.
+	if p, ok := policyMap["stack_deny"]; ok {
+		if p.Type != plugin.AnalyzerPolicyTypeStack {
+			t.Errorf("stack_deny: expected AnalyzerPolicyTypeStack, got %v", p.Type)
+		}
+	} else {
+		t.Error("stack_deny rule not found in policy info")
+	}
+
+	if p, ok := policyMap["stack_warn"]; ok {
+		if p.Type != plugin.AnalyzerPolicyTypeStack {
+			t.Errorf("stack_warn: expected AnalyzerPolicyTypeStack, got %v", p.Type)
+		}
+	} else {
+		t.Error("stack_warn rule not found in policy info")
+	}
 }

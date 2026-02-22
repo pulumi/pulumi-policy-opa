@@ -1,0 +1,38 @@
+{
+  "resources": [
+    {
+      "__name": "bucket-1",
+      "type": "aws:s3/bucket:Bucket",
+      "urn": "urn:pulumi:prod::proj::aws:s3/bucket:Bucket::bucket-1",
+      "acl": "private",
+      "serverSideEncryptionConfiguration": {
+        "rule": {
+          "applyServerSideEncryptionByDefault": {
+            "sseAlgorithm": "AES256"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    {
+      "__name": "orphan-sg",
+      "type": "aws:ec2/securityGroup:SecurityGroup",
+      "urn": "urn:pulumi:prod::proj::aws:ec2/securityGroup:SecurityGroup::orphan-sg",
+      "ingress": [
+        {
+          "protocol": "tcp",
+          "fromPort": 443,
+          "toPort": 443,
+          "cidrBlocks": ["0.0.0.0/0"]
+        }
+      ],
+      "dependencies": []
+    },
+    {
+      "__name": "my-instance",
+      "type": "aws:ec2/instance:Instance",
+      "urn": "urn:pulumi:prod::proj::aws:ec2/instance:Instance::my-instance",
+      "dependencies": []
+    }
+  ]
+}

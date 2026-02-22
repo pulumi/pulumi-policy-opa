@@ -50,44 +50,47 @@ func (a *analyzer) Name() tokens.QName {
 }
 
 func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, error) {
-	var diagnostics []plugin.AnalyzeDiagnostic
-
 	// Build the enriched input object containing both resource properties and metadata
 	// (type, urn, name, options, provider) so that OPA policies can access the full context.
 	// TODO: to attain rule compatibility with OPA rules written for, say, the Kubernetes Admission
 	//     Controller, there is a very different schema we would need to follow. It's possible we should
 	//     make the schema translation pluggable and customizable for certain policy packs and/or providers.
 	obj := buildOPAInput(r)
-	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj)
+	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, resourceScope)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
 	}
 
-	// Translate the policy results into the appropriate analyzer data structures.
-	for _, result := range results {
-		var level apitype.EnforcementLevel
-		if result.level == advisoryRule {
-			level = apitype.Advisory
-		} else {
-			level = apitype.Mandatory
-		}
-		diagnostics = append(diagnostics, plugin.AnalyzeDiagnostic{
-			PolicyName:        result.rule,
-			PolicyPackName:    result.pack,
-			PolicyPackVersion: VersionString,
-			Message:           result.msg,
-			URN:               r.URN,
-			EnforcementLevel:  level,
-		})
-	}
-
-	return plugin.AnalyzeResponse{Diagnostics: diagnostics}, nil
+	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, r.URN)}, nil
 }
 
 func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugin.AnalyzeResponse, error) {
-	// TODO: surface the complete set of resources to the OPA rule, perhaps as a different property.
-	//     We don't bother to re-run the rules here since we already analyzed all of them.
-	return plugin.AnalyzeResponse{}, nil
+	// Short-circuit if no stack-level rules exist.
+	hasStackRules := false
+	for _, pol := range a.pack.Policies {
+		if pol.Scope == stackScope {
+			hasStackRules = true
+			break
+		}
+	}
+	if !hasStackRules {
+		return plugin.AnalyzeResponse{}, nil
+	}
+
+	// Build the stack-level input containing all resources.
+	obj := buildStackOPAInput(resources)
+	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, stackScope)
+	if err != nil {
+		return plugin.AnalyzeResponse{}, err
+	}
+
+	// Use the stack URN for stack-level diagnostics, derived from the first resource.
+	var stackURN resource.URN
+	if len(resources) > 0 {
+		urn := resources[0].URN
+		stackURN = resource.DefaultRootStackURN(urn.Stack(), urn.Project())
+	}
+	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, stackURN)}, nil
 }
 
 func (a *analyzer) Remediate(r plugin.AnalyzerResource) (plugin.RemediateResponse, error) {
@@ -104,12 +107,21 @@ func (a *analyzer) GetAnalyzerInfo() (plugin.AnalyzerInfo, error) {
 		} else {
 			enforcementLevel = apitype.Mandatory
 		}
+
+		var policyType plugin.AnalyzerPolicyType
+		if pol.Scope == stackScope {
+			policyType = plugin.AnalyzerPolicyTypeStack
+		} else {
+			policyType = plugin.AnalyzerPolicyTypeResource
+		}
+
 		policies = append(policies, plugin.AnalyzerPolicyInfo{
 			Name:             pol.Name,
 			DisplayName:      pol.DisplayName,
 			Description:      pol.Description,
 			Message:          pol.Message,
 			EnforcementLevel: enforcementLevel,
+			Type:             policyType,
 		})
 	}
 	return plugin.AnalyzerInfo{
@@ -142,6 +154,30 @@ func (a *analyzer) Cancel(ctx context.Context) error {
 func (a *analyzer) Close() error {
 	// No resources to close
 	return nil
+}
+
+// buildDiagnostics translates OPA evaluation results into Pulumi analyzer diagnostics.
+// For resource-level rules, urn is the individual resource's URN. For stack-level rules,
+// urn is the root stack URN since violations span multiple resources.
+func buildDiagnostics(results []evalPolicyResult, urn resource.URN) []plugin.AnalyzeDiagnostic {
+	var diagnostics []plugin.AnalyzeDiagnostic
+	for _, result := range results {
+		var level apitype.EnforcementLevel
+		if result.level == advisoryRule {
+			level = apitype.Advisory
+		} else {
+			level = apitype.Mandatory
+		}
+		diagnostics = append(diagnostics, plugin.AnalyzeDiagnostic{
+			PolicyName:        result.rule,
+			PolicyPackName:    result.pack,
+			PolicyPackVersion: VersionString,
+			Message:           result.msg,
+			URN:               urn,
+			EnforcementLevel:  level,
+		})
+	}
+	return diagnostics
 }
 
 // buildOPAInput constructs the input object passed to OPA policy evaluation.
@@ -217,6 +253,52 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	obj["__provider"] = providerInfo
 
 	return obj
+}
+
+// buildStackOPAInput constructs the input object passed to OPA stack policy evaluation.
+// It creates a map with a "resources" key containing an array of enriched resource objects,
+// each including the resource's properties, metadata, dependencies, and property dependencies.
+func buildStackOPAInput(resources []plugin.AnalyzerStackResource) map[string]any {
+	resourceList := make([]map[string]any, 0)
+
+	for _, sr := range resources {
+		obj := buildOPAInput(sr.AnalyzerResource)
+
+		// Override options.parent with the AnalyzerStackResource.Parent if non-empty,
+		// as it may provide a more accurate value than Options.Parent.
+		if sr.Parent != "" {
+			if opts, ok := obj["options"].(map[string]any); ok {
+				opts["parent"] = string(sr.Parent)
+			}
+		}
+
+		// Add stack-level fields.
+		if sr.Dependencies != nil {
+			deps := make([]string, len(sr.Dependencies))
+			for i, d := range sr.Dependencies {
+				deps[i] = string(d)
+			}
+			obj["dependencies"] = deps
+		}
+
+		if sr.PropertyDependencies != nil {
+			propDeps := make(map[string][]string)
+			for k, urns := range sr.PropertyDependencies {
+				strs := make([]string, len(urns))
+				for i, u := range urns {
+					strs[i] = string(u)
+				}
+				propDeps[string(k)] = strs
+			}
+			obj["propertyDependencies"] = propDeps
+		}
+
+		resourceList = append(resourceList, obj)
+	}
+
+	return map[string]any{
+		"resources": resourceList,
+	}
 }
 
 // propertyKeysToStrings converts a slice of PropertyKey to a slice of strings.
