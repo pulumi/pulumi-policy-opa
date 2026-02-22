@@ -159,6 +159,7 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	// Set metadata fields first so resource properties can override them.
 	obj["type"] = string(r.Type)
 	obj["urn"] = string(r.URN)
+	obj["name"] = r.Name
 	obj["__name"] = r.Name
 
 	// Add resource options.
@@ -167,7 +168,8 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 		"ignoreChanges":           r.Options.IgnoreChanges,
 		"deleteBeforeReplace":     r.Options.DeleteBeforeReplace,
 		"additionalSecretOutputs": propertyKeysToStrings(r.Options.AdditionalSecretOutputs),
-		"aliases":                 aliasURNsToStrings(r.Options.AliasURNs),
+		"aliasURNs":               aliasURNsToStrings(r.Options.AliasURNs),
+		"aliases":                 aliasesToMaps(r.Options.Aliases),
 		"customTimeouts": map[string]any{
 			"create": r.Options.CustomTimeouts.Create,
 			"update": r.Options.CustomTimeouts.Update,
@@ -177,7 +179,8 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	}
 	obj["options"] = opts
 
-	// Add provider info if available.
+	// Add provider info. Use an empty map when provider is nil so that
+	// input.provider and input.__provider are always defined.
 	var providerInfo map[string]any
 	if r.Provider != nil {
 		providerInfo = map[string]any{
@@ -186,8 +189,10 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 			"urn":        string(r.Provider.URN),
 			"properties": r.Provider.Properties.Mappable(),
 		}
-		obj["provider"] = providerInfo
+	} else {
+		providerInfo = map[string]any{}
 	}
+	obj["provider"] = providerInfo
 
 	// Expose the properties as a nested "properties" bag so that policies
 	// can access them via input.properties.<key> without metadata key collisions.
@@ -209,9 +214,7 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	obj["__name"] = r.Name
 	obj["__options"] = opts
 	obj["__properties"] = r.Properties.Mappable()
-	if providerInfo != nil {
-		obj["__provider"] = providerInfo
-	}
+	obj["__provider"] = providerInfo
 
 	return obj
 }
@@ -236,6 +239,26 @@ func aliasURNsToStrings(urns []resource.URN) []string {
 	result := make([]string, len(urns))
 	for i, u := range urns {
 		result[i] = string(u)
+	}
+	return result
+}
+
+// aliasesToMaps converts a slice of Alias to a slice of maps for OPA consumption.
+func aliasesToMaps(aliases []resource.Alias) []map[string]any {
+	if aliases == nil {
+		return nil
+	}
+	result := make([]map[string]any, len(aliases))
+	for i, a := range aliases {
+		result[i] = map[string]any{
+			"urn":      string(a.URN),
+			"name":     a.Name,
+			"type":     a.Type,
+			"project":  a.Project,
+			"stack":    a.Stack,
+			"parent":   string(a.Parent),
+			"noParent": a.NoParent,
+		}
 	}
 	return result
 }

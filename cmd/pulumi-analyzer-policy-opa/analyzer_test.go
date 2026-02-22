@@ -91,11 +91,15 @@ func TestBuildInput_IncludesURN(t *testing.T) {
 	}
 }
 
-// TestBuildInput_IncludesName verifies that the resource name is added as __name.
+// TestBuildInput_IncludesName verifies that the resource name is added as both
+// "name" and "__name".
 func TestBuildInput_IncludesName(t *testing.T) {
 	r := makeResource()
 	input := buildOPAInput(r)
 
+	if input["name"] != "my-bucket" {
+		t.Errorf("expected input[\"name\"] = \"my-bucket\", got %v", input["name"])
+	}
 	if input["__name"] != "my-bucket" {
 		t.Errorf("expected input[\"__name\"] = \"my-bucket\", got %v", input["__name"])
 	}
@@ -114,6 +118,13 @@ func TestBuildInput_IncludesOptions(t *testing.T) {
 		},
 		AliasURNs: []resource.URN{
 			resource.URN("urn:pulumi:stack::proj::type::old-name"),
+		},
+		Aliases: []resource.Alias{
+			{
+				URN:  resource.URN("urn:pulumi:stack::proj::type::old-alias"),
+				Name: "old-alias",
+				Type: "old:type",
+			},
 		},
 		CustomTimeouts: resource.CustomTimeouts{
 			Create: 300,
@@ -158,12 +169,29 @@ func TestBuildInput_IncludesOptions(t *testing.T) {
 		t.Errorf("expected additionalSecretOutputs = [\"connectionString\"], got %v", secretOutputs)
 	}
 
-	aliases, ok := opts["aliases"].([]string)
+	aliasURNs, ok := opts["aliasURNs"].([]string)
 	if !ok {
-		t.Fatal("expected options.aliases to be []string")
+		t.Fatal("expected options.aliasURNs to be []string")
 	}
-	if len(aliases) != 1 || aliases[0] != "urn:pulumi:stack::proj::type::old-name" {
-		t.Errorf("expected aliases = [\"urn:pulumi:stack::proj::type::old-name\"], got %v", aliases)
+	if len(aliasURNs) != 1 || aliasURNs[0] != "urn:pulumi:stack::proj::type::old-name" {
+		t.Errorf("expected aliasURNs = [\"urn:pulumi:stack::proj::type::old-name\"], got %v", aliasURNs)
+	}
+
+	aliases, ok := opts["aliases"].([]map[string]any)
+	if !ok {
+		t.Fatal("expected options.aliases to be []map[string]any")
+	}
+	if len(aliases) != 1 {
+		t.Fatalf("expected 1 alias, got %d", len(aliases))
+	}
+	if aliases[0]["urn"] != "urn:pulumi:stack::proj::type::old-alias" {
+		t.Errorf("expected alias.urn, got %v", aliases[0]["urn"])
+	}
+	if aliases[0]["name"] != "old-alias" {
+		t.Errorf("expected alias.name = \"old-alias\", got %v", aliases[0]["name"])
+	}
+	if aliases[0]["type"] != "old:type" {
+		t.Errorf("expected alias.type = \"old:type\", got %v", aliases[0]["type"])
 	}
 
 	timeouts, ok := opts["customTimeouts"].(map[string]any)
@@ -222,15 +250,28 @@ func TestBuildInput_IncludesProvider(t *testing.T) {
 	}
 }
 
-// TestBuildInput_NilProvider verifies that provider is absent when r.Provider is nil.
+// TestBuildInput_NilProvider verifies that provider is an empty map when r.Provider is nil.
 func TestBuildInput_NilProvider(t *testing.T) {
 	r := makeResource()
 	r.Provider = nil
 
 	input := buildOPAInput(r)
 
-	if _, exists := input["provider"]; exists {
-		t.Errorf("expected input[\"provider\"] to be absent when Provider is nil, got %v", input["provider"])
+	prov, ok := input["provider"].(map[string]any)
+	if !ok {
+		t.Fatal("expected input[\"provider\"] to be an empty map when Provider is nil")
+	}
+	if len(prov) != 0 {
+		t.Errorf("expected empty provider map, got %v", prov)
+	}
+
+	// __provider should also be present and empty.
+	dprov, ok := input["__provider"].(map[string]any)
+	if !ok {
+		t.Fatal("expected input[\"__provider\"] to be an empty map when Provider is nil")
+	}
+	if len(dprov) != 0 {
+		t.Errorf("expected empty __provider map, got %v", dprov)
 	}
 }
 
