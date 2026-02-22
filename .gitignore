@@ -1,3 +1,4 @@
 vendor/
 dist/
-pulumi-analyzer-policy-opa
+plans/
+/pulumi-analyzer-policy-opa

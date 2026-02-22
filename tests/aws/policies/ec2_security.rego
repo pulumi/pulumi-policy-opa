@@ -1,23 +1,22 @@
 package aws
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # EC2 Instance Policy: Require encryption for EBS volumes
-deny[msg] {
+deny contains msg if {
     input.type == "aws:ebs/volume:Volume"
     not input.encrypted
     msg := sprintf("EBS volume '%s' must be encrypted", [input.__name])
 }
 
-deny[msg] {
+deny contains msg if {
     input.type == "aws:ebs/volume:Volume"
     input.encrypted == false
     msg := sprintf("EBS volume '%s' must be encrypted", [input.__name])
 }
 
 # EC2 Instance Policy: No t2.micro in production
-deny[msg] {
+deny contains msg if {
     input.type == "aws:ec2/instance:Instance"
     input.instanceType == "t2.micro"
     contains(lower(input.__name), "prod")
@@ -25,14 +24,14 @@ deny[msg] {
 }
 
 # EC2 Instance Policy: Require monitoring
-warn[msg] {
+warn contains msg if {
     input.type == "aws:ec2/instance:Instance"
     not input.monitoring
     msg := sprintf("EC2 instance '%s' should have detailed monitoring enabled", [input.__name])
 }
 
 # Security Group Policy: No unrestricted SSH access
-deny[msg] {
+deny contains msg if {
     input.type == "aws:ec2/securityGroup:SecurityGroup"
     some rule in input.ingress
     rule.protocol == "tcp"
@@ -43,7 +42,7 @@ deny[msg] {
 }
 
 # Security Group Policy: No unrestricted RDP access
-deny[msg] {
+deny contains msg if {
     input.type == "aws:ec2/securityGroup:SecurityGroup"
     some rule in input.ingress
     rule.protocol == "tcp"
@@ -54,7 +53,7 @@ deny[msg] {
 }
 
 # Security Group Policy: Warn on overly permissive rules
-warn[msg] {
+warn contains msg if {
     input.type == "aws:ec2/securityGroup:SecurityGroup"
     some rule in input.ingress
     rule.protocol == "-1"

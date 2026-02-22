@@ -62,6 +62,12 @@ func GetTestSuites() []TestSuite {
 			FixtureDir:  "kubernetes/fixtures",
 			PackageName: "kubernetes",
 		},
+		{
+			Provider:    "Metadata",
+			PolicyDir:   "metadata/policies",
+			FixtureDir:  "metadata/fixtures",
+			PackageName: "metadata",
+		},
 	}
 }
 
@@ -185,6 +191,18 @@ func TestKubernetesPolicies(t *testing.T) {
 		PolicyDir:   "kubernetes/policies",
 		FixtureDir:  "kubernetes/fixtures",
 		PackageName: "kubernetes",
+	}
+
+	runTestSuite(t, suite)
+}
+
+// TestMetadataPolicies tests Metadata policies
+func TestMetadataPolicies(t *testing.T) {
+	suite := TestSuite{
+		Provider:    "Metadata",
+		PolicyDir:   "metadata/policies",
+		FixtureDir:  "metadata/fixtures",
+		PackageName: "metadata",
 	}
 
 	runTestSuite(t, suite)

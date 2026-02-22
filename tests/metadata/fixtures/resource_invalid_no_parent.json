@@ -1,0 +1,27 @@
+{
+  "__name": "staging-bucket",
+  "type": "aws:s3/bucket:Bucket",
+  "urn": "urn:pulumi:staging::my-project::aws:s3/bucket:Bucket::staging-bucket",
+  "options": {
+    "protect": true,
+    "ignoreChanges": [],
+    "deleteBeforeReplace": null,
+    "additionalSecretOutputs": [],
+    "aliases": [],
+    "customTimeouts": {
+      "create": 0,
+      "update": 0,
+      "delete": 0
+    },
+    "parent": ""
+  },
+  "provider": {
+    "type": "pulumi:providers:aws",
+    "name": "prod-aws",
+    "urn": "urn:pulumi:staging::my-project::pulumi:providers:aws::prod-aws",
+    "properties": {
+      "region": "us-west-2"
+    }
+  },
+  "acl": "private"
+}
