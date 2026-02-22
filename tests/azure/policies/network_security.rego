@@ -1,10 +1,9 @@
 package azure
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # Network Security Group Policy: No unrestricted SSH
-deny[msg] {
+deny contains msg if {
     input.type == "azure-native:network:NetworkSecurityGroup"
     some rule in input.securityRules
     rule.access == "Allow"
@@ -15,7 +14,7 @@ deny[msg] {
 }
 
 # Network Security Group Policy: No unrestricted RDP
-deny[msg] {
+deny contains msg if {
     input.type == "azure-native:network:NetworkSecurityGroup"
     some rule in input.securityRules
     rule.access == "Allow"
@@ -26,7 +25,7 @@ deny[msg] {
 }
 
 # Network Security Group Policy: Warn on overly permissive rules
-warn[msg] {
+warn contains msg if {
     input.type == "azure-native:network:NetworkSecurityGroup"
     some rule in input.securityRules
     rule.access == "Allow"
@@ -37,7 +36,7 @@ warn[msg] {
 }
 
 # Virtual Network Policy: Require DDoS protection for production
-deny[msg] {
+deny contains msg if {
     input.type == "azure-native:network:VirtualNetwork"
     contains(lower(input.__name), "prod")
     not input.enableDdosProtection
@@ -45,14 +44,14 @@ deny[msg] {
 }
 
 # Application Gateway Policy: Require WAF
-warn[msg] {
+warn contains msg if {
     input.type == "azure-native:network:ApplicationGateway"
     not input.webApplicationFirewallConfiguration
     msg := sprintf("Application Gateway '%s' should have Web Application Firewall enabled", [input.__name])
 }
 
 # Application Gateway Policy: WAF should be in prevention mode
-warn[msg] {
+warn contains msg if {
     input.type == "azure-native:network:ApplicationGateway"
     input.webApplicationFirewallConfiguration
     input.webApplicationFirewallConfiguration.firewallMode == "Detection"

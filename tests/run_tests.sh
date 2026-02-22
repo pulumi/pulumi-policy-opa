@@ -51,6 +51,13 @@ test_policy() {
         fi
     fi
 
+    # Also check for warn rules
+    if echo "$result" | grep -q '"warn":\s*\['; then
+        if ! echo "$result" | grep -q '"warn":\s*\[\s*\]'; then
+            has_violations=true
+        fi
+    fi
+
     # Determine if test passed
     local test_passed=false
     if [ "$expected_result" = "pass" ] && [ "$has_violations" = false ]; then
@@ -67,7 +74,7 @@ test_policy() {
         FAILED_TESTS=$((FAILED_TESTS + 1))
         echo "  Expected: $expected_result, Got violations: $has_violations"
         if [ "$has_violations" = true ]; then
-            echo "$result" | grep -A 5 '"deny"'
+            echo "$result" | grep -A 5 '"deny"\|"warn"'
         fi
     fi
 }
@@ -130,6 +137,27 @@ if [ -d "kubernetes/policies" ] && [ -d "kubernetes/fixtures" ]; then
     for fixture in kubernetes/fixtures/*_invalid*.json; do
         if [ -f "$fixture" ]; then
             test_policy "kubernetes/policies" "$fixture" "fail" "K8s: $(basename $fixture)"
+        fi
+    done
+fi
+
+echo ""
+echo "============================================"
+echo "Testing Metadata Policies"
+echo "============================================"
+
+if [ -d "metadata/policies" ] && [ -d "metadata/fixtures" ]; then
+    # Test valid fixtures (should pass)
+    for fixture in metadata/fixtures/*_valid.json; do
+        if [ -f "$fixture" ]; then
+            test_policy "metadata/policies" "$fixture" "pass" "Metadata: $(basename $fixture)"
+        fi
+    done
+
+    # Test invalid fixtures (should fail)
+    for fixture in metadata/fixtures/*_invalid*.json; do
+        if [ -f "$fixture" ]; then
+            test_policy "metadata/policies" "$fixture" "fail" "Metadata: $(basename $fixture)"
         fi
     done
 fi

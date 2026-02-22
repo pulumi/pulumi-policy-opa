@@ -1,10 +1,9 @@
 package aws
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # IAM Policy: No wildcard actions
-deny[msg] {
+deny contains msg if {
     input.type == "aws:iam/policy:Policy"
     policy := json.unmarshal(input.policy)
     some statement in policy.Statement
@@ -14,7 +13,7 @@ deny[msg] {
 }
 
 # IAM Policy: No wildcard resources for broad actions
-deny[msg] {
+deny contains msg if {
     input.type == "aws:iam/policy:Policy"
     policy := json.unmarshal(input.policy)
     some statement in policy.Statement
@@ -25,7 +24,7 @@ deny[msg] {
 }
 
 # IAM Role Policy: Require MFA for assume role
-warn[msg] {
+warn contains msg if {
     input.type == "aws:iam/role:Role"
     policy := json.unmarshal(input.assumeRolePolicy)
     some statement in policy.Statement
@@ -35,20 +34,20 @@ warn[msg] {
 }
 
 # IAM User Policy: Warn against creating IAM users (prefer roles)
-warn[msg] {
+warn contains msg if {
     input.type == "aws:iam/user:User"
     msg := sprintf("Consider using IAM roles instead of user '%s' for better security practices", [input.__name])
 }
 
 # Helper function to check if action is read-only
-is_read_only_action(action) {
+is_read_only_action(action) if {
     startswith(action, "Describe")
 }
 
-is_read_only_action(action) {
+is_read_only_action(action) if {
     startswith(action, "Get")
 }
 
-is_read_only_action(action) {
+is_read_only_action(action) if {
     startswith(action, "List")
 }

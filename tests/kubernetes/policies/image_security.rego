@@ -1,17 +1,16 @@
 package kubernetes
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # Image: No latest tag
-deny[msg] {
+deny contains msg if {
     is_deployment_or_pod
     some container in input_containers
     endswith(container.image, ":latest")
     msg := sprintf("%s '%s' container '%s' must not use :latest tag", [input.kind, name, container.name])
 }
 
-deny[msg] {
+deny contains msg if {
     is_deployment_or_pod
     some container in input_containers
     not contains(container.image, ":")
@@ -26,7 +25,7 @@ allowed_registries = {
     "registry.k8s.io"
 }
 
-warn[msg] {
+warn contains msg if {
     is_deployment_or_pod
     some container in input_containers
     registry := split(container.image, "/")[0]
@@ -35,7 +34,7 @@ warn[msg] {
 }
 
 # Image: Pull policy should be defined
-warn[msg] {
+warn contains msg if {
     is_deployment_or_pod
     some container in input_containers
     not container.imagePullPolicy
@@ -43,7 +42,7 @@ warn[msg] {
 }
 
 # Image: Always pull for production
-warn[msg] {
+warn contains msg if {
     is_deployment_or_pod
     contains(lower(name), "prod")
     some container in input_containers

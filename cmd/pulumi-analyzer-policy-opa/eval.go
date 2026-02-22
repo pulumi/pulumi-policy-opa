@@ -55,7 +55,7 @@ func (e *evaler) evalPolicyPack(
 						results = append(results, evalPolicyResult{
 							pack:  pack.Name,
 							rule:  rule.Name,
-							msg:   v.(string),
+							msg:   fmt.Sprintf("%v", v),
 							level: rule.Level,
 						})
 					}

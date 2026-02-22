@@ -1,10 +1,9 @@
 package kubernetes
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # Resource Requirements: Must specify CPU limits
-deny[msg] {
+deny contains msg if {
     is_deployment_or_pod
     some container in input_containers
     not container.resources.limits.cpu
@@ -12,7 +11,7 @@ deny[msg] {
 }
 
 # Resource Requirements: Must specify memory limits
-deny[msg] {
+deny contains msg if {
     is_deployment_or_pod
     some container in input_containers
     not container.resources.limits.memory
@@ -20,7 +19,7 @@ deny[msg] {
 }
 
 # Resource Requirements: Must specify CPU requests
-warn[msg] {
+warn contains msg if {
     is_deployment_or_pod
     some container in input_containers
     not container.resources.requests.cpu
@@ -28,7 +27,7 @@ warn[msg] {
 }
 
 # Resource Requirements: Must specify memory requests
-warn[msg] {
+warn contains msg if {
     is_deployment_or_pod
     some container in input_containers
     not container.resources.requests.memory
@@ -36,7 +35,7 @@ warn[msg] {
 }
 
 # Resource Requirements: Requests should not exceed limits
-deny[msg] {
+deny contains msg if {
     is_deployment_or_pod
     some container in input_containers
     cpu_request := parse_cpu(container.resources.requests.cpu)
@@ -45,7 +44,7 @@ deny[msg] {
     msg := sprintf("%s '%s' container '%s' has CPU request exceeding limit", [input.kind, name, container.name])
 }
 
-deny[msg] {
+deny contains msg if {
     is_deployment_or_pod
     some container in input_containers
     mem_request := parse_memory(container.resources.requests.memory)
@@ -55,25 +54,25 @@ deny[msg] {
 }
 
 # Helper to parse CPU (simplified)
-parse_cpu(cpu) = result {
+parse_cpu(cpu) = result if {
     endswith(cpu, "m")
     trimmed := trim_suffix(cpu, "m")
     result := to_number(trimmed)
 }
 
-parse_cpu(cpu) = result {
+parse_cpu(cpu) = result if {
     not endswith(cpu, "m")
     result := to_number(cpu) * 1000
 }
 
 # Helper to parse memory (simplified)
-parse_memory(mem) = result {
+parse_memory(mem) = result if {
     endswith(mem, "Mi")
     trimmed := trim_suffix(mem, "Mi")
     result := to_number(trimmed)
 }
 
-parse_memory(mem) = result {
+parse_memory(mem) = result if {
     endswith(mem, "Gi")
     trimmed := trim_suffix(mem, "Gi")
     result := to_number(trimmed) * 1024

@@ -20,6 +20,7 @@ import (
 	"github.com/blang/semver"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/apitype"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
@@ -51,11 +52,12 @@ func (a *analyzer) Name() tokens.QName {
 func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, error) {
 	var diagnostics []plugin.AnalyzeDiagnostic
 
-	// Run the policy pack against this object's metadata.
+	// Build the enriched input object containing both resource properties and metadata
+	// (type, urn, name, options, provider) so that OPA policies can access the full context.
 	// TODO: to attain rule compatibility with OPA rules written for, say, the Kubernetes Admission
 	//     Controller, there is a very different schema we would need to follow. It's possible we should
 	//     make the schema translation pluggable and customizable for certain policy packs and/or providers.
-	obj := r.Properties.Mappable()
+	obj := buildOPAInput(r)
 	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
@@ -140,4 +142,100 @@ func (a *analyzer) Cancel(ctx context.Context) error {
 func (a *analyzer) Close() error {
 	// No resources to close
 	return nil
+}
+
+// buildOPAInput constructs the input object passed to OPA policy evaluation.
+// It starts with the resource metadata fields (type, urn, __name, options, provider,
+// properties) and then overlays the resource's own properties on top so that Rego
+// policies can access the full AnalyzerResource context.
+//
+// If a resource property has the same key as a metadata field, the resource property
+// takes precedence for backwards compatibility. Policy authors can use the __-prefixed
+// versions (__type, __urn, __name, __options, __provider, __properties) to reliably
+// access metadata regardless of property name collisions.
+func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
+	obj := make(map[string]any)
+
+	// Set metadata fields first so resource properties can override them.
+	obj["type"] = string(r.Type)
+	obj["urn"] = string(r.URN)
+	obj["__name"] = r.Name
+
+	// Add resource options.
+	opts := map[string]any{
+		"protect":                 r.Options.Protect,
+		"ignoreChanges":           r.Options.IgnoreChanges,
+		"deleteBeforeReplace":     r.Options.DeleteBeforeReplace,
+		"additionalSecretOutputs": propertyKeysToStrings(r.Options.AdditionalSecretOutputs),
+		"aliases":                 aliasURNsToStrings(r.Options.AliasURNs),
+		"customTimeouts": map[string]any{
+			"create": r.Options.CustomTimeouts.Create,
+			"update": r.Options.CustomTimeouts.Update,
+			"delete": r.Options.CustomTimeouts.Delete,
+		},
+		"parent": string(r.Options.Parent),
+	}
+	obj["options"] = opts
+
+	// Add provider info if available.
+	var providerInfo map[string]any
+	if r.Provider != nil {
+		providerInfo = map[string]any{
+			"type":       string(r.Provider.Type),
+			"name":       r.Provider.Name,
+			"urn":        string(r.Provider.URN),
+			"properties": r.Provider.Properties.Mappable(),
+		}
+		obj["provider"] = providerInfo
+	}
+
+	// Expose the properties as a nested "properties" bag so that policies
+	// can access them via input.properties.<key> without metadata key collisions.
+	obj["properties"] = r.Properties.Mappable()
+
+	// Overlay resource properties so they take precedence over metadata
+	// fields at the top level for backwards compatibility.
+	for k, v := range r.Properties.Mappable() {
+		obj[k] = v
+	}
+
+	// Set __-prefixed metadata fields last so they are always available as a
+	// collision-safe escape hatch, even if a resource property has the same name
+	// as a metadata field (e.g. input.__type always returns the resource type).
+	obj["__type"] = string(r.Type)
+	obj["__urn"] = string(r.URN)
+	// __name is already prefixed and set above; re-set it here to guarantee it
+	// survives a (highly unlikely) resource property named "__name".
+	obj["__name"] = r.Name
+	obj["__options"] = opts
+	obj["__properties"] = r.Properties.Mappable()
+	if providerInfo != nil {
+		obj["__provider"] = providerInfo
+	}
+
+	return obj
+}
+
+// propertyKeysToStrings converts a slice of PropertyKey to a slice of strings.
+func propertyKeysToStrings(keys []resource.PropertyKey) []string {
+	if keys == nil {
+		return nil
+	}
+	result := make([]string, len(keys))
+	for i, k := range keys {
+		result[i] = string(k)
+	}
+	return result
+}
+
+// aliasURNsToStrings converts a slice of URN to a slice of strings.
+func aliasURNsToStrings(urns []resource.URN) []string {
+	if urns == nil {
+		return nil
+	}
+	result := make([]string, len(urns))
+	for i, u := range urns {
+		result[i] = string(u)
+	}
+	return result
 }

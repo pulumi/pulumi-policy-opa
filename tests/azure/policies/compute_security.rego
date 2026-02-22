@@ -1,17 +1,16 @@
 package azure
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # Virtual Machine Policy: Require managed disks
-deny[msg] {
+deny contains msg if {
     input.type == "azure-native:compute:VirtualMachine"
     not input.storageProfile.osDisk.managedDisk
     msg := sprintf("Virtual machine '%s' must use managed disks", [input.__name])
 }
 
 # Virtual Machine Policy: Require OS disk encryption
-warn[msg] {
+warn contains msg if {
     input.type == "azure-native:compute:VirtualMachine"
     input.storageProfile.osDisk
     not input.storageProfile.osDisk.encryptionSettings
@@ -19,7 +18,7 @@ warn[msg] {
 }
 
 # Virtual Machine Policy: No public IP for production
-deny[msg] {
+deny contains msg if {
     input.type == "azure-native:compute:VirtualMachine"
     contains(lower(input.__name), "prod")
     input.networkProfile
@@ -31,13 +30,13 @@ deny[msg] {
 }
 
 # Disk Policy: Require encryption
-deny[msg] {
+deny contains msg if {
     input.type == "azure-native:compute:Disk"
     not input.encryption
     msg := sprintf("Disk '%s' must have encryption enabled", [input.__name])
 }
 
-deny[msg] {
+deny contains msg if {
     input.type == "azure-native:compute:Disk"
     input.encryption
     input.encryption.type == "EncryptionAtRestWithPlatformKey"
@@ -46,14 +45,14 @@ deny[msg] {
 }
 
 # VM Scale Set Policy: Require automatic OS upgrades
-warn[msg] {
+warn contains msg if {
     input.type == "azure-native:compute:VirtualMachineScaleSet"
     not input.upgradePolicy.automaticOSUpgradePolicy
     msg := sprintf("VM scale set '%s' should enable automatic OS upgrades", [input.__name])
 }
 
 # VM Scale Set Policy: Require health monitoring
-warn[msg] {
+warn contains msg if {
     input.type == "azure-native:compute:VirtualMachineScaleSet"
     not input.healthProbeId
     msg := sprintf("VM scale set '%s' should have health monitoring enabled", [input.__name])

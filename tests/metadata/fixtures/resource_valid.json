@@ -1,0 +1,29 @@
+{
+  "__name": "prod-database",
+  "type": "aws:rds/instance:Instance",
+  "urn": "urn:pulumi:production::my-project::aws:rds/instance:Instance::prod-database",
+  "options": {
+    "protect": true,
+    "ignoreChanges": [],
+    "deleteBeforeReplace": null,
+    "additionalSecretOutputs": [],
+    "aliases": [],
+    "customTimeouts": {
+      "create": 0,
+      "update": 0,
+      "delete": 0
+    },
+    "parent": "urn:pulumi:production::my-project::custom:component:Database::db-component"
+  },
+  "provider": {
+    "type": "pulumi:providers:aws",
+    "name": "prod-aws",
+    "urn": "urn:pulumi:production::my-project::pulumi:providers:aws::prod-aws",
+    "properties": {
+      "region": "us-west-2"
+    }
+  },
+  "engine": "postgres",
+  "instanceClass": "db.r5.large",
+  "storageEncrypted": true
+}

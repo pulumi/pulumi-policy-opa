@@ -1,0 +1,2 @@
+description: Metadata policy tests - validates OPA policies can access resource metadata fields
+runtime: opa

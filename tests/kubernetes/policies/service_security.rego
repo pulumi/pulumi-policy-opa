@@ -1,10 +1,9 @@
 package kubernetes
 
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 # Service: No LoadBalancer for production without annotations
-warn[msg] {
+warn contains msg if {
     input.kind == "Service"
     input.spec.type == "LoadBalancer"
     contains(lower(name), "prod")
@@ -13,21 +12,21 @@ warn[msg] {
 }
 
 # Service: NodePort should be avoided
-warn[msg] {
+warn contains msg if {
     input.kind == "Service"
     input.spec.type == "NodePort"
     msg := sprintf("Service '%s' uses NodePort, consider using LoadBalancer or Ingress instead", [name])
 }
 
 # Ingress: Require TLS
-deny[msg] {
+deny contains msg if {
     input.kind == "Ingress"
     contains(lower(name), "prod")
     not input.spec.tls
     msg := sprintf("Production Ingress '%s' must have TLS configured", [name])
 }
 
-deny[msg] {
+deny contains msg if {
     input.kind == "Ingress"
     contains(lower(name), "prod")
     count(input.spec.tls) == 0
@@ -35,7 +34,7 @@ deny[msg] {
 }
 
 # NetworkPolicy: Warn if no network policy for namespace
-warn[msg] {
+warn contains msg if {
     input.kind == "Deployment"
     contains(lower(name), "prod")
     # This would need additional context about NetworkPolicies in the namespace
