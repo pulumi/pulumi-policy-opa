@@ -31,8 +31,9 @@ var VersionString = "0.0.1+dev"
 
 // analyzer implements the Analyzer interface needed to plug into Pulumi as a policy analyzer.
 type analyzer struct {
-	pack *policyPack
-	e    *evaler
+	pack         *policyPack
+	e            *evaler
+	policyConfig map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
 }
 
 func NewAnalyzer(
@@ -56,12 +57,12 @@ func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, e
 	//     Controller, there is a very different schema we would need to follow. It's possible we should
 	//     make the schema translation pluggable and customizable for certain policy packs and/or providers.
 	obj := buildOPAInput(r)
-	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, resourceScope)
+	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, resourceScope, a.policyConfig)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
 	}
 
-	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, r.URN)}, nil
+	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, r.URN, a.policyConfig)}, nil
 }
 
 func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugin.AnalyzeResponse, error) {
@@ -79,7 +80,7 @@ func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugi
 
 	// Build the stack-level input containing all resources.
 	obj := buildStackOPAInput(resources)
-	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, stackScope)
+	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, stackScope, a.policyConfig)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
 	}
@@ -90,7 +91,7 @@ func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugi
 		urn := resources[0].URN
 		stackURN = resource.DefaultRootStackURN(urn.Stack(), urn.Project())
 	}
-	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, stackURN)}, nil
+	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, stackURN, a.policyConfig)}, nil
 }
 
 func (a *analyzer) Remediate(r plugin.AnalyzerResource) (plugin.RemediateResponse, error) {
@@ -101,13 +102,6 @@ func (a *analyzer) Remediate(r plugin.AnalyzerResource) (plugin.RemediateRespons
 func (a *analyzer) GetAnalyzerInfo() (plugin.AnalyzerInfo, error) {
 	var policies []plugin.AnalyzerPolicyInfo
 	for _, pol := range a.pack.Policies {
-		var enforcementLevel apitype.EnforcementLevel
-		if pol.Level == advisoryRule {
-			enforcementLevel = apitype.Advisory
-		} else {
-			enforcementLevel = apitype.Mandatory
-		}
-
 		var policyType plugin.AnalyzerPolicyType
 		if pol.Scope == stackScope {
 			policyType = plugin.AnalyzerPolicyTypeStack
@@ -120,14 +114,16 @@ func (a *analyzer) GetAnalyzerInfo() (plugin.AnalyzerInfo, error) {
 			DisplayName:      pol.DisplayName,
 			Description:      pol.Description,
 			Message:          pol.Message,
-			EnforcementLevel: enforcementLevel,
+			EnforcementLevel: enforcementLevelToAPI(pol.Level),
 			Type:             policyType,
+			ConfigSchema:     pol.ConfigSchema,
 		})
 	}
 	return plugin.AnalyzerInfo{
-		Name:        a.pack.Name,
-		DisplayName: a.pack.DisplayName,
-		Policies:    policies,
+		Name:           a.pack.Name,
+		DisplayName:    a.pack.DisplayName,
+		Policies:       policies,
+		SupportsConfig: true,
 	}, nil
 }
 
@@ -142,7 +138,7 @@ func (a *analyzer) GetPluginInfo() (workspace.PluginInfo, error) {
 }
 
 func (a *analyzer) Configure(policyConfig map[string]plugin.AnalyzerPolicyConfig) error {
-	// No configuration needed for now
+	a.policyConfig = policyConfig
 	return nil
 }
 
@@ -159,15 +155,29 @@ func (a *analyzer) Close() error {
 // buildDiagnostics translates OPA evaluation results into Pulumi analyzer diagnostics.
 // For resource-level rules, urn is the individual resource's URN. For stack-level rules,
 // urn is the root stack URN since violations span multiple resources.
-func buildDiagnostics(results []evalPolicyResult, urn resource.URN) []plugin.AnalyzeDiagnostic {
+//
+// If policyConfig contains an enforcement level override for a rule, it takes precedence
+// over the rule-prefix-derived level. Disabled rules are omitted from the output.
+func buildDiagnostics(
+	results []evalPolicyResult,
+	urn resource.URN,
+	policyConfig map[string]plugin.AnalyzerPolicyConfig,
+) []plugin.AnalyzeDiagnostic {
 	var diagnostics []plugin.AnalyzeDiagnostic
 	for _, result := range results {
-		var level apitype.EnforcementLevel
-		if result.level == advisoryRule {
-			level = apitype.Advisory
-		} else {
-			level = apitype.Mandatory
+		level := enforcementLevelToAPI(result.level)
+
+		// Apply enforcement level override from configuration if present.
+		// Checks policy-specific config first, then the "all" pack-wide default.
+		if override := configuredEnforcementLevel(policyConfig, result.rule); override != "" {
+			level = override
 		}
+
+		// Skip diagnostics for disabled rules.
+		if level == apitype.Disabled {
+			continue
+		}
+
 		diagnostics = append(diagnostics, plugin.AnalyzeDiagnostic{
 			PolicyName:        result.rule,
 			PolicyPackName:    result.pack,
@@ -178,6 +188,18 @@ func buildDiagnostics(results []evalPolicyResult, urn resource.URN) []plugin.Ana
 		})
 	}
 	return diagnostics
+}
+
+// enforcementLevelToAPI converts an internal enforcementLevel to the Pulumi API type.
+func enforcementLevelToAPI(level enforcementLevel) apitype.EnforcementLevel {
+	switch level {
+	case advisoryRule:
+		return apitype.Advisory
+	case disabledRule:
+		return apitype.Disabled
+	default:
+		return apitype.Mandatory
+	}
 }
 
 // buildOPAInput constructs the input object passed to OPA policy evaluation.

@@ -334,7 +334,7 @@ deny contains val if {
 		},
 	}
 
-	results, err := e.evalPolicyPack(context.Background(), pack, map[string]any{}, resourceScope)
+	results, err := e.evalPolicyPack(context.Background(), pack, map[string]any{}, resourceScope, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -621,7 +621,7 @@ stack_deny[msg] {
 
 	// Evaluate with stack scope — should only get stack violations.
 	input := map[string]any{"resources": []any{}}
-	results, err := e.evalPolicyPack(context.Background(), pack, input, stackScope)
+	results, err := e.evalPolicyPack(context.Background(), pack, input, stackScope, nil)
 	if err != nil {
 		t.Fatalf("evalPolicyPack failed: %v", err)
 	}
@@ -656,7 +656,7 @@ stack_deny[msg] {
 
 	// Evaluate with resource scope — should only get resource violations.
 	input := map[string]any{"acl": "test"}
-	results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope)
+	results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
 	if err != nil {
 		t.Fatalf("evalPolicyPack failed: %v", err)
 	}

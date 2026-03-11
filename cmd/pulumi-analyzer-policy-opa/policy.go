@@ -15,6 +15,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/pkg/errors"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
 )
 
 // Rego modules contain rules, some of which have prefixes. Only those with the appropriate
@@ -139,6 +141,14 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 		}
 	}
 
+	// Load optional config schemas from config-schema.json alongside the Rego files.
+	configSchemas := loadConfigSchemas(dir)
+	for _, pol := range policies {
+		if schema, ok := configSchemas[pol.Name]; ok {
+			pol.ConfigSchema = schema
+		}
+	}
+
 	// Create the resulting policy pack metadata.
 	pack := &policyPack{
 		Name: packName,
@@ -161,12 +171,13 @@ type policyPack struct {
 
 // policyRule holds the metadata for a Pulumi policy rule, in addition to the OPA rule authored in *.rego.
 type policyRule struct {
-	Name        string           `json:"name"`
-	DisplayName string           `json:"displayName"`
-	Description string           `json:"description"`
-	Message     string           `json:"message"`
-	Level       enforcementLevel `json:"enforcementLevel"`
-	Scope       policyScope      `json:"scope"`
+	Name         string                          `json:"name"`
+	DisplayName  string                          `json:"displayName"`
+	Description  string                          `json:"description"`
+	Message      string                          `json:"message"`
+	Level        enforcementLevel                `json:"enforcementLevel"`
+	Scope        policyScope                     `json:"scope"`
+	ConfigSchema *plugin.AnalyzerPolicyConfigSchema `json:"configSchema,omitempty"`
 }
 
 type enforcementLevel int
@@ -174,6 +185,7 @@ type enforcementLevel int
 const (
 	advisoryRule  enforcementLevel = 0
 	mandatoryRule enforcementLevel = 1
+	disabledRule  enforcementLevel = 2
 )
 
 type policyScope int
@@ -182,3 +194,49 @@ const (
 	resourceScope policyScope = 0
 	stackScope    policyScope = 1
 )
+
+// configSchemaFile represents the JSON structure of config-schema.json.
+// It maps policy rule names to their config schema definitions.
+//
+// Example config-schema.json:
+//
+//	{
+//	  "deny_large_instances": {
+//	    "properties": {
+//	      "maxInstanceSize": {
+//	        "type": "string",
+//	        "default": "t3.large"
+//	      }
+//	    },
+//	    "required": ["maxInstanceSize"]
+//	  }
+//	}
+type configSchemaFile map[string]struct {
+	Properties map[string]plugin.JSONSchema `json:"properties"`
+	Required   []string                     `json:"required,omitempty"`
+}
+
+// loadConfigSchemas loads optional config schema definitions from a
+// config-schema.json file in the policy pack directory. Returns an empty
+// map if the file does not exist or cannot be parsed.
+func loadConfigSchemas(dir string) map[string]*plugin.AnalyzerPolicyConfigSchema {
+	schemas := make(map[string]*plugin.AnalyzerPolicyConfigSchema)
+
+	data, err := os.ReadFile(filepath.Join(dir, "config-schema.json"))
+	if err != nil {
+		return schemas // file is optional
+	}
+
+	var raw configSchemaFile
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return schemas // silently ignore malformed schema
+	}
+
+	for name, def := range raw {
+		schemas[name] = &plugin.AnalyzerPolicyConfigSchema{
+			Properties: def.Properties,
+			Required:   def.Required,
+		}
+	}
+	return schemas
+}
