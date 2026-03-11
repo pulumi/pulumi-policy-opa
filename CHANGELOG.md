@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.0.0
+
+### Summary
+
+First stable release. The OPA policy bridge now has full feature parity with the native
+Python and TypeScript policy SDKs for all capabilities that apply to a Rego-based evaluator:
+resource-level and stack-level policies, enforcement level control (mandatory/advisory/disabled),
+policy configuration with schema validation, and OPA metadata annotations.
+
+### Improvements
+
+- Expanded test coverage for analyzer lifecycle methods (`Name`, `GetPluginInfo`, `Remediate`,
+  `Cancel`, `Close`) and `loadPolicyPack` error paths (invalid Rego syntax, package name
+  mismatches, empty directories). (#34)
+- Tightened README: removed placeholder badges, redundant examples, and non-existent script
+  references; reduced from ~1170 to ~815 lines. (#34)
+
+### Known Limitations
+
+- **Remediation is not supported.** The `Remediate()` method returns an empty response. OPA/Rego
+  is a declarative evaluation engine and is not designed to produce mutated resource state. Use
+  the native TypeScript or Python policy SDKs if you need auto-remediation.
+
 ## v0.2.0
 
 ### New Features
