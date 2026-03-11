@@ -74,16 +74,19 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	}
 
 	// Compile all of the policy files so we can error out early if there are problems.
+	// ProcessAnnotation enables extraction of METADATA annotations (title, description, etc.)
+	// from Rego rules and modules so we can populate policy metadata fields.
 	compiler, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
 		ParserOptions: ast.ParserOptions{
-			RegoVersion: ast.RegoV0,
+			RegoVersion:       ast.RegoV0,
+			ProcessAnnotation: true,
 		},
 	})
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "policy compilation failed")
 	}
 
-	// Buld up a list of rules.
+	// Build up a list of rules.
 	var packName string
 	var policies []*policyRule
 	existing := make(map[string]struct{})
@@ -131,12 +134,30 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 				continue
 			}
 			existing[ruleName] = struct{}{}
+
+			// Extract metadata from OPA rule annotations (# METADATA blocks).
+			var description, message, displayName string
+			displayName = name
+			if len(rule.Annotations) > 0 {
+				ann := rule.Annotations[0]
+				if ann.Title != "" {
+					displayName = ann.Title
+				}
+				if ann.Description != "" {
+					description = ann.Description
+				}
+				if msg, ok := ann.Custom["message"].(string); ok {
+					message = msg
+				}
+			}
+
 			policies = append(policies, &policyRule{
 				Name:        ruleName,
-				DisplayName: name,
-				// TODO: Description, Message
-				Level: level,
-				Scope: scope,
+				DisplayName: displayName,
+				Description: description,
+				Message:     message,
+				Level:       level,
+				Scope:       scope,
 			})
 		}
 	}
@@ -149,11 +170,27 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 		}
 	}
 
+	// Derive pack DisplayName from module-level annotations if available.
+	var packDisplayName string
+	for _, module := range compiler.Modules {
+		if len(module.Annotations) > 0 {
+			for _, ann := range module.Annotations {
+				if ann.Scope == "package" && ann.Title != "" {
+					packDisplayName = ann.Title
+					break
+				}
+			}
+		}
+		if packDisplayName != "" {
+			break
+		}
+	}
+
 	// Create the resulting policy pack metadata.
 	pack := &policyPack{
-		Name: packName,
-		// TODO: DisplayName
-		Policies: policies,
+		Name:        packName,
+		DisplayName: packDisplayName,
+		Policies:    policies,
 	}
 
 	// Make an evaluator that can actually apply the rules using the above compiler.
