@@ -15,8 +15,10 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -293,7 +295,8 @@ stack_violation_3bucket_check[msg] {
 }
 
 // TestLoadPolicies_MultiModuleDedupe verifies that when multiple .rego files
-// define the same rule name, only one policy entry is created (no duplicates).
+// define the same rule name, only one policy entry is created (no duplicates)
+// and a warning is emitted to stderr.
 func TestLoadPolicies_MultiModuleDedupe(t *testing.T) {
 	dir := t.TempDir()
 	file1 := `
@@ -319,9 +322,24 @@ deny[msg] {
 		t.Fatalf("failed to write encryption.rego: %v", err)
 	}
 
-	pack, _, err := loadPolicyPack(dir)
+	// Capture stderr to verify the duplicate warning is emitted.
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("loadPolicyPack failed: %v", err)
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+
+	pack, _, loadErr := loadPolicyPack(dir)
+
+	w.Close()
+	os.Stderr = origStderr
+
+	stderrBytes, _ := io.ReadAll(r)
+	stderrOutput := string(stderrBytes)
+
+	if loadErr != nil {
+		t.Fatalf("loadPolicyPack failed: %v", loadErr)
 	}
 
 	// Count how many policies have the name "deny".
@@ -333,5 +351,10 @@ deny[msg] {
 	}
 	if count != 1 {
 		t.Errorf("expected exactly 1 'deny' policy entry, got %d", count)
+	}
+
+	// Verify that a warning was emitted for the duplicate rule.
+	if !strings.Contains(stderrOutput, "warning: duplicate rule") {
+		t.Errorf("expected duplicate rule warning on stderr, got: %q", stderrOutput)
 	}
 }

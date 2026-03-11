@@ -15,6 +15,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -83,7 +84,7 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	// Buld up a list of rules.
 	var packName string
 	var policies []*policyRule
-	existing := make(map[string]bool)
+	existing := make(map[string]struct{})
 	for name, module := range compiler.Modules {
 		// First determine the package name. This should match for all rules.
 		pkg := module.Package.String()
@@ -123,16 +124,18 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 				continue // skip
 			}
 
-			if _, has := existing[ruleName]; !has {
-				existing[ruleName] = true
-				policies = append(policies, &policyRule{
-					Name:        ruleName,
-					DisplayName: name,
-					// TODO: Description, Message
-					Level: level,
-					Scope: scope,
-				})
+			if _, has := existing[ruleName]; has {
+				fmt.Fprintf(os.Stderr, "warning: duplicate rule %q in module %q, skipping\n", ruleName, name)
+				continue
 			}
+			existing[ruleName] = struct{}{}
+			policies = append(policies, &policyRule{
+				Name:        ruleName,
+				DisplayName: name,
+				// TODO: Description, Message
+				Level: level,
+				Scope: scope,
+			})
 		}
 	}
 
