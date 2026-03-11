@@ -150,6 +150,7 @@ func LoadPolicies(dir string) (map[string]string, error) {
 
 // EvaluatePolicy evaluates a policy against input data
 func EvaluatePolicy(
+	ctx context.Context,
 	modules map[string]string,
 	packageName string,
 	input map[string]any,
@@ -173,7 +174,7 @@ func EvaluatePolicy(
 	)
 
 	// Evaluate
-	rs, err := query.Eval(context.Background())
+	rs, err := query.Eval(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +192,7 @@ func EvaluatePolicy(
 // EvaluateStackPolicy evaluates all stack-level rules against a stack input.
 // It queries each rule name and aggregates all violations.
 func EvaluateStackPolicy(
+	ctx context.Context,
 	modules map[string]string,
 	packageName string,
 	ruleNames []string,
@@ -216,7 +218,7 @@ func EvaluateStackPolicy(
 			rego.SetRegoVersion(ast.RegoV0),
 		)
 
-		rs, err := query.Eval(context.Background())
+		rs, err := query.Eval(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -328,7 +330,7 @@ func runStackTestSuite(
 
 				// Evaluate stack policy
 				violations, err := EvaluateStackPolicy(
-					modules, suite.PackageName, suite.RuleNames, fixture)
+					t.Context(), modules, suite.PackageName, suite.RuleNames, fixture)
 				if err != nil {
 					t.Fatalf("Stack policy evaluation failed: %v", err)
 				}
@@ -390,7 +392,7 @@ func runTestSuite(
 				}
 
 				// Evaluate policy
-				violations, err := EvaluatePolicy(modules, suite.PackageName, fixture)
+				violations, err := EvaluatePolicy(t.Context(), modules, suite.PackageName, fixture)
 				if err != nil {
 					t.Fatalf("Policy evaluation failed: %v", err)
 				}
@@ -439,7 +441,7 @@ func BenchmarkPolicyEvaluation(b *testing.B) {
 			// Benchmark
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, err := EvaluatePolicy(modules, suite.PackageName, fixture)
+				_, err := EvaluatePolicy(b.Context(), modules, suite.PackageName, fixture)
 				if err != nil {
 					b.Fatalf("Evaluation failed: %v", err)
 				}
