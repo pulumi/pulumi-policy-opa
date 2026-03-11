@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/blang/semver"
 
@@ -138,6 +139,17 @@ func (a *analyzer) GetPluginInfo() (workspace.PluginInfo, error) {
 }
 
 func (a *analyzer) Configure(policyConfig map[string]plugin.AnalyzerPolicyConfig) error {
+	// Validate enforcement levels before storing.
+	for name, cfg := range policyConfig {
+		if cfg.EnforcementLevel != "" {
+			switch cfg.EnforcementLevel {
+			case apitype.Advisory, apitype.Mandatory, apitype.Disabled:
+				// valid
+			default:
+				return fmt.Errorf("invalid enforcement level %q for policy %q", cfg.EnforcementLevel, name)
+			}
+		}
+	}
 	a.policyConfig = policyConfig
 	return nil
 }

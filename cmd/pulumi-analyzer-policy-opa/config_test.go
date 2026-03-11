@@ -69,6 +69,34 @@ deny[msg] {
 	}
 }
 
+// TestConfigure_RejectsInvalidEnforcementLevel verifies that Configure returns
+// an error when given an unrecognized enforcement level string.
+func TestConfigure_RejectsInvalidEnforcementLevel(t *testing.T) {
+	module := `
+package test
+
+deny[msg] {
+    msg := "fail"
+}
+`
+	dir := writeRegoFile(t, "policy.rego", module)
+	pack, e, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e).(*analyzer)
+
+	config := map[string]plugin.AnalyzerPolicyConfig{
+		"deny": {
+			EnforcementLevel: "bogus",
+		},
+	}
+	if err := a.Configure(config); err == nil {
+		t.Fatal("expected Configure to reject invalid enforcement level")
+	}
+}
+
 // --- Config passthrough to Rego via data.config ---
 
 // TestConfig_DataConfigAccessible verifies that config properties are available
