@@ -77,11 +77,12 @@ func evalDeny(t *testing.T, compiler *ast.Compiler, pkg string, input any) []str
 	return evalRule(t, compiler, pkg, "deny", input)
 }
 
-// --- Resource-level eval tests ---
+func TestEval_ResourcePolicy(t *testing.T) {
+	t.Parallel()
 
-// TestEval_PolicyCanAccessType verifies that a Rego policy can read input.type.
-func TestEval_PolicyCanAccessType(t *testing.T) {
-	module := `
+	t.Run("AccessType", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -91,28 +92,28 @@ deny contains msg if {
     msg := "matched s3 bucket type"
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	// Should match.
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"type": "aws:s3/bucket:Bucket",
+		// Should match.
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"type": "aws:s3/bucket:Bucket",
+		})
+		if len(violations) != 1 || violations[0] != "matched s3 bucket type" {
+			t.Errorf("expected one violation matching type, got %v", violations)
+		}
+
+		// Should not match.
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"type": "aws:ec2/instance:Instance",
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for non-matching type, got %v", violations)
+		}
 	})
-	if len(violations) != 1 || violations[0] != "matched s3 bucket type" {
-		t.Errorf("expected one violation matching type, got %v", violations)
-	}
 
-	// Should not match.
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"type": "aws:ec2/instance:Instance",
-	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for non-matching type, got %v", violations)
-	}
-}
-
-// TestEval_PolicyCanAccessURN verifies that a Rego policy can read input.urn.
-func TestEval_PolicyCanAccessURN(t *testing.T) {
-	module := `
+	t.Run("AccessURN", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -122,26 +123,26 @@ deny contains msg if {
     msg := "production resource detected"
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"urn": "urn:pulumi:production::my-project::aws:s3/bucket:Bucket::my-bucket",
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"urn": "urn:pulumi:production::my-project::aws:s3/bucket:Bucket::my-bucket",
+		})
+		if len(violations) != 1 || violations[0] != "production resource detected" {
+			t.Errorf("expected production violation, got %v", violations)
+		}
+
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"urn": "urn:pulumi:staging::my-project::aws:s3/bucket:Bucket::my-bucket",
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for staging URN, got %v", violations)
+		}
 	})
-	if len(violations) != 1 || violations[0] != "production resource detected" {
-		t.Errorf("expected production violation, got %v", violations)
-	}
 
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"urn": "urn:pulumi:staging::my-project::aws:s3/bucket:Bucket::my-bucket",
-	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for staging URN, got %v", violations)
-	}
-}
-
-// TestEval_PolicyCanAccessName verifies that a Rego policy can read input.__name.
-func TestEval_PolicyCanAccessName(t *testing.T) {
-	module := `
+	t.Run("AccessName", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -151,26 +152,26 @@ deny contains msg if {
     msg := sprintf("production resource: %s", [input.__name])
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"__name": "prod-database",
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"__name": "prod-database",
+		})
+		if len(violations) != 1 {
+			t.Errorf("expected one violation for prod resource, got %v", violations)
+		}
+
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"__name": "dev-database",
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for dev resource, got %v", violations)
+		}
 	})
-	if len(violations) != 1 {
-		t.Errorf("expected one violation for prod resource, got %v", violations)
-	}
 
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"__name": "dev-database",
-	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for dev resource, got %v", violations)
-	}
-}
-
-// TestEval_PolicyCanAccessOptions_Protect verifies that a Rego policy can read input.options.protect.
-func TestEval_PolicyCanAccessOptions_Protect(t *testing.T) {
-	module := `
+	t.Run("AccessOptions/Protect", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -180,31 +181,30 @@ deny contains msg if {
     msg := "resource must be protected"
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"protect": false,
-		},
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"protect": false,
+			},
+		})
+		if len(violations) != 1 || violations[0] != "resource must be protected" {
+			t.Errorf("expected protect violation, got %v", violations)
+		}
+
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"protect": true,
+			},
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations when protected, got %v", violations)
+		}
 	})
-	if len(violations) != 1 || violations[0] != "resource must be protected" {
-		t.Errorf("expected protect violation, got %v", violations)
-	}
 
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"protect": true,
-		},
-	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations when protected, got %v", violations)
-	}
-}
-
-// TestEval_PolicyCanAccessOptions_IgnoreChanges verifies that a Rego policy can
-// read input.options.ignoreChanges.
-func TestEval_PolicyCanAccessOptions_IgnoreChanges(t *testing.T) {
-	module := `
+	t.Run("AccessOptions/IgnoreChanges", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -214,30 +214,30 @@ deny contains msg if {
     msg := "ignoreChanges should not be used"
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"ignoreChanges": []string{"tags"},
-		},
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"ignoreChanges": []string{"tags"},
+			},
+		})
+		if len(violations) != 1 {
+			t.Errorf("expected violation for ignoreChanges, got %v", violations)
+		}
+
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"ignoreChanges": []string{},
+			},
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violation for empty ignoreChanges, got %v", violations)
+		}
 	})
-	if len(violations) != 1 {
-		t.Errorf("expected violation for ignoreChanges, got %v", violations)
-	}
 
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"ignoreChanges": []string{},
-		},
-	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violation for empty ignoreChanges, got %v", violations)
-	}
-}
-
-// TestEval_PolicyCanAccessProvider verifies that a Rego policy can read input.provider.
-func TestEval_PolicyCanAccessProvider(t *testing.T) {
-	module := `
+	t.Run("AccessProvider", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -248,40 +248,40 @@ deny contains msg if {
     msg := "us-east-1 is not allowed"
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"provider": map[string]any{
-			"type": "pulumi:providers:aws",
-			"name": "my-provider",
-			"urn":  "urn:pulumi:stack::proj::pulumi:providers:aws::my-provider",
-			"properties": map[string]any{
-				"region": "us-east-1",
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"provider": map[string]any{
+				"type": "pulumi:providers:aws",
+				"name": "my-provider",
+				"urn":  "urn:pulumi:stack::proj::pulumi:providers:aws::my-provider",
+				"properties": map[string]any{
+					"region": "us-east-1",
+				},
 			},
-		},
-	})
-	if len(violations) != 1 || violations[0] != "us-east-1 is not allowed" {
-		t.Errorf("expected region violation, got %v", violations)
-	}
+		})
+		if len(violations) != 1 || violations[0] != "us-east-1 is not allowed" {
+			t.Errorf("expected region violation, got %v", violations)
+		}
 
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"provider": map[string]any{
-			"type": "pulumi:providers:aws",
-			"name": "my-provider",
-			"urn":  "urn:pulumi:stack::proj::pulumi:providers:aws::my-provider",
-			"properties": map[string]any{
-				"region": "us-west-2",
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"provider": map[string]any{
+				"type": "pulumi:providers:aws",
+				"name": "my-provider",
+				"urn":  "urn:pulumi:stack::proj::pulumi:providers:aws::my-provider",
+				"properties": map[string]any{
+					"region": "us-west-2",
+				},
 			},
-		},
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for us-west-2, got %v", violations)
+		}
 	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for us-west-2, got %v", violations)
-	}
-}
 
-// TestEval_PolicyCanAccessOptions_Parent verifies that a Rego policy can read input.options.parent.
-func TestEval_PolicyCanAccessOptions_Parent(t *testing.T) {
-	module := `
+	t.Run("AccessOptions/Parent", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -291,31 +291,30 @@ deny contains msg if {
     msg := "resource must have a parent"
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"parent": "",
-		},
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"parent": "",
+			},
+		})
+		if len(violations) != 1 || violations[0] != "resource must have a parent" {
+			t.Errorf("expected parent violation, got %v", violations)
+		}
+
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"parent": "urn:pulumi:stack::proj::type::parent",
+			},
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations when parent is set, got %v", violations)
+		}
 	})
-	if len(violations) != 1 || violations[0] != "resource must have a parent" {
-		t.Errorf("expected parent violation, got %v", violations)
-	}
 
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"parent": "urn:pulumi:stack::proj::type::parent",
-		},
-	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations when parent is set, got %v", violations)
-	}
-}
-
-// TestEval_NonStringRuleValue verifies that a Rego rule returning a non-string
-// value (e.g. a number or object) does not crash the evaluator.
-func TestEval_NonStringRuleValue(t *testing.T) {
-	module := `
+	t.Run("NonStringRuleValue", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -324,34 +323,33 @@ deny contains val if {
     val := 42
 }
 `
-	compiler := compileModule(t, "test", module)
-	e := &evaler{c: compiler}
+		compiler := compileModule(t, "test", module)
+		e := &evaler{c: compiler}
 
-	pack := &policyPack{
-		Name: "test",
-		Policies: []*policyRule{
-			{Name: "deny", Level: mandatoryRule, Scope: resourceScope},
-		},
-	}
+		pack := &policyPack{
+			Name: "test",
+			Policies: []*policyRule{
+				{Name: "deny", Level: mandatoryRule, Scope: resourceScope},
+			},
+		}
 
-	results, err := e.evalPolicyPack(context.Background(), pack, map[string]any{}, resourceScope, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+		results, err := e.evalPolicyPack(context.Background(), pack, map[string]any{}, resourceScope, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
+		}
 
-	if results[0].msg != "42" {
-		t.Errorf("expected msg '42', got %q", results[0].msg)
-	}
-}
+		if results[0].msg != "42" {
+			t.Errorf("expected msg '42', got %q", results[0].msg)
+		}
+	})
 
-// TestEval_PolicyCanAccessProperties verifies that a Rego policy can read
-// input.properties.<key> as an alternative to input.<key>.
-func TestEval_PolicyCanAccessProperties(t *testing.T) {
-	module := `
+	t.Run("AccessProperties", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -361,35 +359,34 @@ deny contains msg if {
     msg := sprintf("bucket %s has public ACL via properties bag", [input.__name])
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	// Should match via input.properties.acl.
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"__name": "my-bucket",
-		"properties": map[string]any{
-			"acl": "public-read",
-		},
+		// Should match via input.properties.acl.
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"__name": "my-bucket",
+			"properties": map[string]any{
+				"acl": "public-read",
+			},
+		})
+		if len(violations) != 1 {
+			t.Errorf("expected one violation for public ACL, got %v", violations)
+		}
+
+		// Should not match.
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"__name": "my-bucket",
+			"properties": map[string]any{
+				"acl": "private",
+			},
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for private ACL, got %v", violations)
+		}
 	})
-	if len(violations) != 1 {
-		t.Errorf("expected one violation for public ACL, got %v", violations)
-	}
 
-	// Should not match.
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"__name": "my-bucket",
-		"properties": map[string]any{
-			"acl": "private",
-		},
-	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for private ACL, got %v", violations)
-	}
-}
-
-// TestEval_PolicyCanAccessOptions_CustomTimeouts verifies that a Rego policy can
-// read input.options.customTimeouts.
-func TestEval_PolicyCanAccessOptions_CustomTimeouts(t *testing.T) {
-	module := `
+	t.Run("AccessOptions/CustomTimeouts", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 import rego.v1
@@ -399,41 +396,42 @@ deny contains msg if {
     msg := "create timeout exceeds 10 minutes"
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	violations := evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"customTimeouts": map[string]any{
-				"create": float64(900),
-				"update": float64(0),
-				"delete": float64(0),
+		violations := evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"customTimeouts": map[string]any{
+					"create": float64(900),
+					"update": float64(0),
+					"delete": float64(0),
+				},
 			},
-		},
-	})
-	if len(violations) != 1 || violations[0] != "create timeout exceeds 10 minutes" {
-		t.Errorf("expected timeout violation, got %v", violations)
-	}
+		})
+		if len(violations) != 1 || violations[0] != "create timeout exceeds 10 minutes" {
+			t.Errorf("expected timeout violation, got %v", violations)
+		}
 
-	violations = evalDeny(t, compiler, "test", map[string]any{
-		"options": map[string]any{
-			"customTimeouts": map[string]any{
-				"create": float64(300),
-				"update": float64(0),
-				"delete": float64(0),
+		violations = evalDeny(t, compiler, "test", map[string]any{
+			"options": map[string]any{
+				"customTimeouts": map[string]any{
+					"create": float64(300),
+					"update": float64(0),
+					"delete": float64(0),
+				},
 			},
-		},
+		})
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for 5min timeout, got %v", violations)
+		}
 	})
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for 5min timeout, got %v", violations)
-	}
 }
 
-// --- Stack-level eval tests ---
+func TestEval_StackPolicy(t *testing.T) {
+	t.Parallel()
 
-// TestEval_StackPolicyCanAccessResources verifies that a Rego stack rule
-// can iterate over input.resources.
-func TestEval_StackPolicyCanAccessResources(t *testing.T) {
-	module := `
+	t.Run("AccessResources", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 stack_deny[msg] {
@@ -443,33 +441,32 @@ stack_deny[msg] {
     msg := sprintf("bucket '%s' is public", [r.__name])
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	input := map[string]any{
-		"resources": []any{
-			map[string]any{
-				"__name": "bucket-1",
-				"type":   "aws:s3/bucket:Bucket",
-				"acl":    "public-read",
+		input := map[string]any{
+			"resources": []any{
+				map[string]any{
+					"__name": "bucket-1",
+					"type":   "aws:s3/bucket:Bucket",
+					"acl":    "public-read",
+				},
+				map[string]any{
+					"__name": "bucket-2",
+					"type":   "aws:s3/bucket:Bucket",
+					"acl":    "private",
+				},
 			},
-			map[string]any{
-				"__name": "bucket-2",
-				"type":   "aws:s3/bucket:Bucket",
-				"acl":    "private",
-			},
-		},
-	}
+		}
 
-	violations := evalRule(t, compiler, "test", "stack_deny", input)
-	if len(violations) != 1 || violations[0] != "bucket 'bucket-1' is public" {
-		t.Errorf("expected one violation for bucket-1, got %v", violations)
-	}
-}
+		violations := evalRule(t, compiler, "test", "stack_deny", input)
+		if len(violations) != 1 || violations[0] != "bucket 'bucket-1' is public" {
+			t.Errorf("expected one violation for bucket-1, got %v", violations)
+		}
+	})
 
-// TestEval_StackPolicyCanCountResources verifies that a Rego stack rule
-// can count resources.
-func TestEval_StackPolicyCanCountResources(t *testing.T) {
-	module := `
+	t.Run("CountResources", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 stack_deny[msg] {
@@ -477,36 +474,35 @@ stack_deny[msg] {
     msg := sprintf("too many resources: %d", [count(input.resources)])
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	// 3 resources — should violate.
-	input := map[string]any{
-		"resources": []any{
+		// 3 resources — should violate.
+		input := map[string]any{
+			"resources": []any{
+				map[string]any{"__name": "r1", "type": "a"},
+				map[string]any{"__name": "r2", "type": "b"},
+				map[string]any{"__name": "r3", "type": "c"},
+			},
+		}
+		violations := evalRule(t, compiler, "test", "stack_deny", input)
+		if len(violations) != 1 {
+			t.Errorf("expected one violation for 3 resources, got %v", violations)
+		}
+
+		// 2 resources — should pass.
+		input["resources"] = []any{
 			map[string]any{"__name": "r1", "type": "a"},
 			map[string]any{"__name": "r2", "type": "b"},
-			map[string]any{"__name": "r3", "type": "c"},
-		},
-	}
-	violations := evalRule(t, compiler, "test", "stack_deny", input)
-	if len(violations) != 1 {
-		t.Errorf("expected one violation for 3 resources, got %v", violations)
-	}
+		}
+		violations = evalRule(t, compiler, "test", "stack_deny", input)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for 2 resources, got %v", violations)
+		}
+	})
 
-	// 2 resources — should pass.
-	input["resources"] = []any{
-		map[string]any{"__name": "r1", "type": "a"},
-		map[string]any{"__name": "r2", "type": "b"},
-	}
-	violations = evalRule(t, compiler, "test", "stack_deny", input)
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for 2 resources, got %v", violations)
-	}
-}
-
-// TestEval_StackPolicyCanFilterByType verifies that a Rego stack rule
-// can filter resources by type.
-func TestEval_StackPolicyCanFilterByType(t *testing.T) {
-	module := `
+	t.Run("FilterByType", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 stack_deny[msg] {
@@ -515,26 +511,25 @@ stack_deny[msg] {
     msg := sprintf("too many S3 buckets: %d", [count(buckets)])
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	input := map[string]any{
-		"resources": []any{
-			map[string]any{"__name": "bucket-1", "type": "aws:s3/bucket:Bucket"},
-			map[string]any{"__name": "bucket-2", "type": "aws:s3/bucket:Bucket"},
-			map[string]any{"__name": "instance-1", "type": "aws:ec2/instance:Instance"},
-		},
-	}
+		input := map[string]any{
+			"resources": []any{
+				map[string]any{"__name": "bucket-1", "type": "aws:s3/bucket:Bucket"},
+				map[string]any{"__name": "bucket-2", "type": "aws:s3/bucket:Bucket"},
+				map[string]any{"__name": "instance-1", "type": "aws:ec2/instance:Instance"},
+			},
+		}
 
-	violations := evalRule(t, compiler, "test", "stack_deny", input)
-	if len(violations) != 1 {
-		t.Errorf("expected one violation for 2 buckets, got %v", violations)
-	}
-}
+		violations := evalRule(t, compiler, "test", "stack_deny", input)
+		if len(violations) != 1 {
+			t.Errorf("expected one violation for 2 buckets, got %v", violations)
+		}
+	})
 
-// TestEval_StackPolicyCanAccessDependencies verifies that a Rego stack rule
-// can read resource dependencies.
-func TestEval_StackPolicyCanAccessDependencies(t *testing.T) {
-	module := `
+	t.Run("AccessDependencies", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 stack_deny[msg] {
@@ -544,30 +539,29 @@ stack_deny[msg] {
     msg := sprintf("resource '%s' depends on a security group", [r.__name])
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	input := map[string]any{
-		"resources": []any{
-			map[string]any{
-				"__name": "my-instance",
-				"type":   "aws:ec2/instance:Instance",
-				"dependencies": []any{
-					"urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg",
+		input := map[string]any{
+			"resources": []any{
+				map[string]any{
+					"__name": "my-instance",
+					"type":   "aws:ec2/instance:Instance",
+					"dependencies": []any{
+						"urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg",
+					},
 				},
 			},
-		},
-	}
+		}
 
-	violations := evalRule(t, compiler, "test", "stack_deny", input)
-	if len(violations) != 1 {
-		t.Errorf("expected one violation for sg dependency, got %v", violations)
-	}
-}
+		violations := evalRule(t, compiler, "test", "stack_deny", input)
+		if len(violations) != 1 {
+			t.Errorf("expected one violation for sg dependency, got %v", violations)
+		}
+	})
 
-// TestEval_StackPolicyCanAccessPropertyDependencies verifies that a Rego stack
-// rule can read per-property dependencies.
-func TestEval_StackPolicyCanAccessPropertyDependencies(t *testing.T) {
-	module := `
+	t.Run("AccessPropertyDependencies", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 stack_deny[msg] {
@@ -577,32 +571,31 @@ stack_deny[msg] {
     msg := sprintf("resource '%s' has subnetId dependencies", [r.__name])
 }
 `
-	compiler := compileModule(t, "test", module)
+		compiler := compileModule(t, "test", module)
 
-	input := map[string]any{
-		"resources": []any{
-			map[string]any{
-				"__name": "my-instance",
-				"type":   "aws:ec2/instance:Instance",
-				"propertyDependencies": map[string]any{
-					"subnetId": []any{
-						"urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet",
+		input := map[string]any{
+			"resources": []any{
+				map[string]any{
+					"__name": "my-instance",
+					"type":   "aws:ec2/instance:Instance",
+					"propertyDependencies": map[string]any{
+						"subnetId": []any{
+							"urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet",
+						},
 					},
 				},
 			},
-		},
-	}
+		}
 
-	violations := evalRule(t, compiler, "test", "stack_deny", input)
-	if len(violations) != 1 {
-		t.Errorf("expected one violation, got %v", violations)
-	}
-}
+		violations := evalRule(t, compiler, "test", "stack_deny", input)
+		if len(violations) != 1 {
+			t.Errorf("expected one violation, got %v", violations)
+		}
+	})
 
-// TestEval_StackPolicyScopeFiltering verifies that evalPolicyPack with stackScope
-// only evaluates stack rules, not resource rules.
-func TestEval_StackPolicyScopeFiltering(t *testing.T) {
-	module := `
+	t.Run("StackScopeFiltering", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 deny[msg] {
@@ -613,31 +606,30 @@ stack_deny[msg] {
     msg := "stack violation"
 }
 `
-	dir := writeRegoFile(t, "policy.rego", module)
-	pack, e, err := loadPolicyPack(dir)
-	if err != nil {
-		t.Fatalf("loadPolicyPack failed: %v", err)
-	}
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
 
-	// Evaluate with stack scope — should only get stack violations.
-	input := map[string]any{"resources": []any{}}
-	results, err := e.evalPolicyPack(context.Background(), pack, input, stackScope, nil)
-	if err != nil {
-		t.Fatalf("evalPolicyPack failed: %v", err)
-	}
+		// Evaluate with stack scope — should only get stack violations.
+		input := map[string]any{"resources": []any{}}
+		results, err := e.evalPolicyPack(context.Background(), pack, input, stackScope, nil)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].msg != "stack violation" {
-		t.Errorf("expected 'stack violation', got %q", results[0].msg)
-	}
-}
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
+		}
+		if results[0].msg != "stack violation" {
+			t.Errorf("expected 'stack violation', got %q", results[0].msg)
+		}
+	})
 
-// TestEval_ResourcePolicyScopeFiltering verifies that evalPolicyPack with resourceScope
-// only evaluates resource rules, not stack rules.
-func TestEval_ResourcePolicyScopeFiltering(t *testing.T) {
-	module := `
+	t.Run("ResourceScopeFiltering", func(t *testing.T) {
+		t.Parallel()
+		module := `
 package test
 
 deny[msg] {
@@ -648,26 +640,24 @@ stack_deny[msg] {
     msg := "stack violation"
 }
 `
-	dir := writeRegoFile(t, "policy.rego", module)
-	pack, e, err := loadPolicyPack(dir)
-	if err != nil {
-		t.Fatalf("loadPolicyPack failed: %v", err)
-	}
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
 
-	// Evaluate with resource scope — should only get resource violations.
-	input := map[string]any{"acl": "test"}
-	results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
-	if err != nil {
-		t.Fatalf("evalPolicyPack failed: %v", err)
-	}
+		// Evaluate with resource scope — should only get resource violations.
+		input := map[string]any{"acl": "test"}
+		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].msg != "resource violation" {
-		t.Errorf("expected 'resource violation', got %q", results[0].msg)
-	}
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
+		}
+		if results[0].msg != "resource violation" {
+			t.Errorf("expected 'resource violation', got %q", results[0].msg)
+		}
+	})
 }
-
-// TestEval_NonStringRuleValue verifies that non-string values returned by OPA
-// rules (e.g., integers) are converted to strings instead of causing a panic.

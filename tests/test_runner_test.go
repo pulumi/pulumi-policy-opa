@@ -233,60 +233,25 @@ func EvaluateStackPolicy(
 	return allViolations, nil
 }
 
-// TestAWSPolicies tests AWS policies
-func TestAWSPolicies(t *testing.T) {
-	suite := TestSuite{
-		Provider:    "AWS",
-		PolicyDir:   "aws/policies",
-		FixtureDir:  "aws/fixtures",
-		PackageName: "aws",
-	}
+func TestResourcePolicies(t *testing.T) {
+	t.Parallel()
 
-	runTestSuite(t, suite)
+	for _, suite := range GetTestSuites() {
+		t.Run(suite.Provider, func(t *testing.T) {
+			t.Parallel()
+			runTestSuite(t, suite)
+		})
+	}
 }
 
-// TestAzurePolicies tests Azure policies
-func TestAzurePolicies(t *testing.T) {
-	suite := TestSuite{
-		Provider:    "Azure",
-		PolicyDir:   "azure/policies",
-		FixtureDir:  "azure/fixtures",
-		PackageName: "azure",
-	}
-
-	runTestSuite(t, suite)
-}
-
-// TestKubernetesPolicies tests Kubernetes policies
-func TestKubernetesPolicies(t *testing.T) {
-	suite := TestSuite{
-		Provider:    "Kubernetes",
-		PolicyDir:   "kubernetes/policies",
-		FixtureDir:  "kubernetes/fixtures",
-		PackageName: "kubernetes",
-	}
-
-	runTestSuite(t, suite)
-}
-
-// TestMetadataPolicies tests Metadata policies
-func TestMetadataPolicies(t *testing.T) {
-	suite := TestSuite{
-		Provider:    "Metadata",
-		PolicyDir:   "metadata/policies",
-		FixtureDir:  "metadata/fixtures",
-		PackageName: "metadata",
-	}
-
-	runTestSuite(t, suite)
-}
-
-// TestStackPolicies tests stack-level policies
 func TestStackPolicies(t *testing.T) {
-	suites := GetStackTestSuites()
+	t.Parallel()
 
-	for _, suite := range suites {
-		runStackTestSuite(t, suite)
+	for _, suite := range GetStackTestSuites() {
+		t.Run(suite.Provider, func(t *testing.T) {
+			t.Parallel()
+			runStackTestSuite(t, suite)
+		})
 	}
 }
 
@@ -295,62 +260,61 @@ func runStackTestSuite(
 	t *testing.T,
 	suite StackTestSuite,
 ) {
-	t.Run(suite.Provider, func(t *testing.T) {
-		// Load policies
-		modules, err := LoadPolicies(suite.PolicyDir)
-		if err != nil {
-			t.Fatalf("Failed to load policies: %v", err)
-		}
+	// Load policies
+	modules, err := LoadPolicies(suite.PolicyDir)
+	if err != nil {
+		t.Fatalf("Failed to load policies: %v", err)
+	}
 
-		if len(modules) == 0 {
-			t.Skipf("No policies found in %s", suite.PolicyDir)
-		}
+	if len(modules) == 0 {
+		t.Skipf("No policies found in %s", suite.PolicyDir)
+	}
 
-		// Find all fixture files
-		fixtures, err := filepath.Glob(filepath.Join(suite.FixtureDir, "*.json"))
-		if err != nil {
-			t.Fatalf("Failed to find fixtures: %v", err)
-		}
+	// Find all fixture files
+	fixtures, err := filepath.Glob(filepath.Join(suite.FixtureDir, "*.json"))
+	if err != nil {
+		t.Fatalf("Failed to find fixtures: %v", err)
+	}
 
-		if len(fixtures) == 0 {
-			t.Skipf("No fixtures found in %s", suite.FixtureDir)
-		}
+	if len(fixtures) == 0 {
+		t.Skipf("No fixtures found in %s", suite.FixtureDir)
+	}
 
-		// Test each fixture
-		for _, fixturePath := range fixtures {
-			filename := filepath.Base(fixturePath)
-			shouldViolate := strings.Contains(filename, "invalid")
+	// Test each fixture
+	for _, fixturePath := range fixtures {
+		filename := filepath.Base(fixturePath)
+		shouldViolate := strings.Contains(filename, "invalid")
 
-			t.Run(filename, func(t *testing.T) {
-				// Load fixture (stack fixtures are {"resources": [...]})
-				fixture, err := LoadFixture(fixturePath)
-				if err != nil {
-					t.Fatalf("Failed to load fixture: %v", err)
-				}
+		t.Run(filename, func(t *testing.T) {
+			t.Parallel()
+			// Load fixture (stack fixtures are {"resources": [...]})
+			fixture, err := LoadFixture(fixturePath)
+			if err != nil {
+				t.Fatalf("Failed to load fixture: %v", err)
+			}
 
-				// Evaluate stack policy
-				violations, err := EvaluateStackPolicy(
-					t.Context(), modules, suite.PackageName, suite.RuleNames, fixture)
-				if err != nil {
-					t.Fatalf("Stack policy evaluation failed: %v", err)
-				}
+			// Evaluate stack policy
+			violations, err := EvaluateStackPolicy(
+				t.Context(), modules, suite.PackageName, suite.RuleNames, fixture)
+			if err != nil {
+				t.Fatalf("Stack policy evaluation failed: %v", err)
+			}
 
-				hasViolations := len(violations) > 0
+			hasViolations := len(violations) > 0
 
-				// Check expectations
-				if shouldViolate && !hasViolations {
-					t.Errorf("Expected violations for %s but got none", filename)
-				} else if !shouldViolate && hasViolations {
-					t.Errorf("Expected no violations for %s but got: %v", filename, violations)
-				}
+			// Check expectations
+			if shouldViolate && !hasViolations {
+				t.Errorf("Expected violations for %s but got none", filename)
+			} else if !shouldViolate && hasViolations {
+				t.Errorf("Expected no violations for %s but got: %v", filename, violations)
+			}
 
-				// Log violations for debugging
-				if hasViolations {
-					t.Logf("Violations found: %v", violations)
-				}
-			})
-		}
-	})
+			// Log violations for debugging
+			if hasViolations {
+				t.Logf("Violations found: %v", violations)
+			}
+		})
+	}
 }
 
 // runTestSuite runs all tests for a test suite
@@ -358,61 +322,60 @@ func runTestSuite(
 	t *testing.T,
 	suite TestSuite,
 ) {
-	t.Run(suite.Provider, func(t *testing.T) {
-		// Load policies
-		modules, err := LoadPolicies(suite.PolicyDir)
-		if err != nil {
-			t.Fatalf("Failed to load policies: %v", err)
-		}
+	// Load policies
+	modules, err := LoadPolicies(suite.PolicyDir)
+	if err != nil {
+		t.Fatalf("Failed to load policies: %v", err)
+	}
 
-		if len(modules) == 0 {
-			t.Skipf("No policies found in %s", suite.PolicyDir)
-		}
+	if len(modules) == 0 {
+		t.Skipf("No policies found in %s", suite.PolicyDir)
+	}
 
-		// Find all fixture files
-		fixtures, err := filepath.Glob(filepath.Join(suite.FixtureDir, "*.json"))
-		if err != nil {
-			t.Fatalf("Failed to find fixtures: %v", err)
-		}
+	// Find all fixture files
+	fixtures, err := filepath.Glob(filepath.Join(suite.FixtureDir, "*.json"))
+	if err != nil {
+		t.Fatalf("Failed to find fixtures: %v", err)
+	}
 
-		if len(fixtures) == 0 {
-			t.Skipf("No fixtures found in %s", suite.FixtureDir)
-		}
+	if len(fixtures) == 0 {
+		t.Skipf("No fixtures found in %s", suite.FixtureDir)
+	}
 
-		// Test each fixture
-		for _, fixturePath := range fixtures {
-			filename := filepath.Base(fixturePath)
-			shouldViolate := strings.Contains(filename, "invalid")
+	// Test each fixture
+	for _, fixturePath := range fixtures {
+		filename := filepath.Base(fixturePath)
+		shouldViolate := strings.Contains(filename, "invalid")
 
-			t.Run(filename, func(t *testing.T) {
-				// Load fixture
-				fixture, err := LoadFixture(fixturePath)
-				if err != nil {
-					t.Fatalf("Failed to load fixture: %v", err)
-				}
+		t.Run(filename, func(t *testing.T) {
+			t.Parallel()
+			// Load fixture
+			fixture, err := LoadFixture(fixturePath)
+			if err != nil {
+				t.Fatalf("Failed to load fixture: %v", err)
+			}
 
-				// Evaluate policy
-				violations, err := EvaluatePolicy(t.Context(), modules, suite.PackageName, fixture)
-				if err != nil {
-					t.Fatalf("Policy evaluation failed: %v", err)
-				}
+			// Evaluate policy
+			violations, err := EvaluatePolicy(t.Context(), modules, suite.PackageName, fixture)
+			if err != nil {
+				t.Fatalf("Policy evaluation failed: %v", err)
+			}
 
-				hasViolations := len(violations) > 0
+			hasViolations := len(violations) > 0
 
-				// Check expectations
-				if shouldViolate && !hasViolations {
-					t.Errorf("Expected violations for %s but got none", filename)
-				} else if !shouldViolate && hasViolations {
-					t.Errorf("Expected no violations for %s but got: %v", filename, violations)
-				}
+			// Check expectations
+			if shouldViolate && !hasViolations {
+				t.Errorf("Expected violations for %s but got none", filename)
+			} else if !shouldViolate && hasViolations {
+				t.Errorf("Expected no violations for %s but got: %v", filename, violations)
+			}
 
-				// Log violations for debugging
-				if hasViolations {
-					t.Logf("Violations found: %v", violations)
-				}
-			})
-		}
-	})
+			// Log violations for debugging
+			if hasViolations {
+				t.Logf("Violations found: %v", violations)
+			}
+		})
+	}
 }
 
 // BenchmarkPolicyEvaluation benchmarks policy evaluation

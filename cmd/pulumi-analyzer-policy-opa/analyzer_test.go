@@ -58,562 +58,554 @@ func makeStackResource(name, resType, urn string) plugin.AnalyzerStackResource {
 	}
 }
 
-// TestBuildInput_IncludesProperties verifies that resource properties appear at the
-// top level of the input map.
-func TestBuildInput_IncludesProperties(t *testing.T) {
-	r := makeResource()
-	input := buildOPAInput(r)
+func TestBuildInput(t *testing.T) {
+	t.Parallel()
 
-	if input["acl"] != "private" {
-		t.Errorf("expected input[\"acl\"] = \"private\", got %v", input["acl"])
-	}
+	t.Run("IncludesProperties", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		input := buildOPAInput(r)
 
-	sse, ok := input["serverSideEncryptionConfiguration"].(map[string]any)
-	if !ok {
-		t.Fatal("expected serverSideEncryptionConfiguration to be a map")
-	}
-	rule, ok := sse["rule"].(map[string]any)
-	if !ok {
-		t.Fatal("expected rule to be a map")
-	}
-	defaults, ok := rule["applyServerSideEncryptionByDefault"].(map[string]any)
-	if !ok {
-		t.Fatal("expected applyServerSideEncryptionByDefault to be a map")
-	}
-	if defaults["sseAlgorithm"] != "AES256" {
-		t.Errorf("expected sseAlgorithm = AES256, got %v", defaults["sseAlgorithm"])
-	}
-}
-
-// TestBuildInput_IncludesType verifies that the resource type is added to the input.
-func TestBuildInput_IncludesType(t *testing.T) {
-	r := makeResource()
-	input := buildOPAInput(r)
-
-	if input["type"] != "aws:s3/bucket:Bucket" {
-		t.Errorf("expected input[\"type\"] = \"aws:s3/bucket:Bucket\", got %v", input["type"])
-	}
-}
-
-// TestBuildInput_IncludesURN verifies that the resource URN is added to the input.
-func TestBuildInput_IncludesURN(t *testing.T) {
-	r := makeResource()
-	input := buildOPAInput(r)
-
-	expected := "urn:pulumi:test-stack::test-project::aws:s3/bucket:Bucket::my-bucket"
-	if input["urn"] != expected {
-		t.Errorf("expected input[\"urn\"] = %q, got %v", expected, input["urn"])
-	}
-}
-
-// TestBuildInput_IncludesName verifies that the resource name is added as both
-// "name" and "__name".
-func TestBuildInput_IncludesName(t *testing.T) {
-	r := makeResource()
-	input := buildOPAInput(r)
-
-	if input["name"] != "my-bucket" {
-		t.Errorf("expected input[\"name\"] = \"my-bucket\", got %v", input["name"])
-	}
-	if input["__name"] != "my-bucket" {
-		t.Errorf("expected input[\"__name\"] = \"my-bucket\", got %v", input["__name"])
-	}
-}
-
-// TestBuildInput_IncludesOptions verifies that resource options are correctly serialized.
-func TestBuildInput_IncludesOptions(t *testing.T) {
-	r := makeResource()
-	deleteBeforeReplace := true
-	r.Options = plugin.AnalyzerResourceOptions{
-		Protect:             true,
-		IgnoreChanges:       []string{"tags", "description"},
-		DeleteBeforeReplace: &deleteBeforeReplace,
-		AdditionalSecretOutputs: []resource.PropertyKey{
-			resource.PropertyKey("connectionString"),
-		},
-		AliasURNs: []resource.URN{
-			resource.URN("urn:pulumi:stack::proj::type::old-name"),
-		},
-		Aliases: []resource.Alias{
-			{
-				URN:  resource.URN("urn:pulumi:stack::proj::type::old-alias"),
-				Name: "old-alias",
-				Type: "old:type",
-			},
-		},
-		CustomTimeouts: resource.CustomTimeouts{
-			Create: 300,
-			Update: 120,
-			Delete: 60,
-		},
-		Parent: resource.URN("urn:pulumi:stack::proj::type::parent-resource"),
-	}
-
-	input := buildOPAInput(r)
-
-	opts, ok := input["options"].(map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"options\"] to be a map")
-	}
-
-	if opts["protect"] != true {
-		t.Errorf("expected options.protect = true, got %v", opts["protect"])
-	}
-
-	ignoreChanges, ok := opts["ignoreChanges"].([]string)
-	if !ok {
-		t.Fatal("expected options.ignoreChanges to be []string")
-	}
-	if len(ignoreChanges) != 2 || ignoreChanges[0] != "tags" || ignoreChanges[1] != "description" {
-		t.Errorf("expected options.ignoreChanges = [\"tags\", \"description\"], got %v", ignoreChanges)
-	}
-
-	dbr, ok := opts["deleteBeforeReplace"].(*bool)
-	if !ok {
-		t.Fatal("expected options.deleteBeforeReplace to be *bool")
-	}
-	if dbr == nil || *dbr != true {
-		t.Errorf("expected options.deleteBeforeReplace = true, got %v", opts["deleteBeforeReplace"])
-	}
-
-	secretOutputs, ok := opts["additionalSecretOutputs"].([]string)
-	if !ok {
-		t.Fatal("expected options.additionalSecretOutputs to be []string")
-	}
-	if len(secretOutputs) != 1 || secretOutputs[0] != "connectionString" {
-		t.Errorf("expected additionalSecretOutputs = [\"connectionString\"], got %v", secretOutputs)
-	}
-
-	aliasURNs, ok := opts["aliasURNs"].([]string)
-	if !ok {
-		t.Fatal("expected options.aliasURNs to be []string")
-	}
-	if len(aliasURNs) != 1 || aliasURNs[0] != "urn:pulumi:stack::proj::type::old-name" {
-		t.Errorf("expected aliasURNs = [\"urn:pulumi:stack::proj::type::old-name\"], got %v", aliasURNs)
-	}
-
-	aliases, ok := opts["aliases"].([]map[string]any)
-	if !ok {
-		t.Fatal("expected options.aliases to be []map[string]any")
-	}
-	if len(aliases) != 1 {
-		t.Fatalf("expected 1 alias, got %d", len(aliases))
-	}
-	if aliases[0]["urn"] != "urn:pulumi:stack::proj::type::old-alias" {
-		t.Errorf("expected alias.urn, got %v", aliases[0]["urn"])
-	}
-	if aliases[0]["name"] != "old-alias" {
-		t.Errorf("expected alias.name = \"old-alias\", got %v", aliases[0]["name"])
-	}
-	if aliases[0]["type"] != "old:type" {
-		t.Errorf("expected alias.type = \"old:type\", got %v", aliases[0]["type"])
-	}
-
-	timeouts, ok := opts["customTimeouts"].(map[string]any)
-	if !ok {
-		t.Fatal("expected options.customTimeouts to be a map")
-	}
-	if timeouts["create"] != float64(300) {
-		t.Errorf("expected customTimeouts.create = 300, got %v", timeouts["create"])
-	}
-	if timeouts["update"] != float64(120) {
-		t.Errorf("expected customTimeouts.update = 120, got %v", timeouts["update"])
-	}
-	if timeouts["delete"] != float64(60) {
-		t.Errorf("expected customTimeouts.delete = 60, got %v", timeouts["delete"])
-	}
-
-	if opts["parent"] != "urn:pulumi:stack::proj::type::parent-resource" {
-		t.Errorf("expected options.parent, got %v", opts["parent"])
-	}
-}
-
-// TestBuildInput_IncludesProvider verifies that provider info is included when non-nil.
-func TestBuildInput_IncludesProvider(t *testing.T) {
-	r := makeResource()
-	r.Provider = &plugin.AnalyzerProviderResource{
-		URN:  resource.URN("urn:pulumi:stack::proj::pulumi:providers:aws::my-provider"),
-		Type: tokens.Type("pulumi:providers:aws"),
-		Name: "my-provider",
-		Properties: resource.NewPropertyMapFromMap(map[string]any{
-			"region": "us-west-2",
-		}),
-	}
-
-	input := buildOPAInput(r)
-
-	prov, ok := input["provider"].(map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"provider\"] to be a map")
-	}
-	if prov["type"] != "pulumi:providers:aws" {
-		t.Errorf("expected provider.type = \"pulumi:providers:aws\", got %v", prov["type"])
-	}
-	if prov["name"] != "my-provider" {
-		t.Errorf("expected provider.name = \"my-provider\", got %v", prov["name"])
-	}
-	if prov["urn"] != "urn:pulumi:stack::proj::pulumi:providers:aws::my-provider" {
-		t.Errorf("expected provider.urn, got %v", prov["urn"])
-	}
-
-	provProps, ok := prov["properties"].(map[string]any)
-	if !ok {
-		t.Fatal("expected provider.properties to be a map")
-	}
-	if provProps["region"] != "us-west-2" {
-		t.Errorf("expected provider.properties.region = \"us-west-2\", got %v", provProps["region"])
-	}
-}
-
-// TestBuildInput_NilProvider verifies that provider is an empty map when r.Provider is nil.
-func TestBuildInput_NilProvider(t *testing.T) {
-	r := makeResource()
-	r.Provider = nil
-
-	input := buildOPAInput(r)
-
-	prov, ok := input["provider"].(map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"provider\"] to be an empty map when Provider is nil")
-	}
-	if len(prov) != 0 {
-		t.Errorf("expected empty provider map, got %v", prov)
-	}
-
-	// __provider should also be present and empty.
-	dprov, ok := input["__provider"].(map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"__provider\"] to be an empty map when Provider is nil")
-	}
-	if len(dprov) != 0 {
-		t.Errorf("expected empty __provider map, got %v", dprov)
-	}
-}
-
-// TestBuildInput_EmptyOptions verifies that zero-value options are still present.
-func TestBuildInput_EmptyOptions(t *testing.T) {
-	r := makeResource()
-	r.Options = plugin.AnalyzerResourceOptions{}
-
-	input := buildOPAInput(r)
-
-	opts, ok := input["options"].(map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"options\"] to be a map")
-	}
-
-	if opts["protect"] != false {
-		t.Errorf("expected options.protect = false, got %v", opts["protect"])
-	}
-	if opts["parent"] != "" {
-		t.Errorf("expected options.parent = \"\", got %v", opts["parent"])
-	}
-	if opts["deleteBeforeReplace"] != (*bool)(nil) {
-		t.Errorf("expected options.deleteBeforeReplace = nil, got %v", opts["deleteBeforeReplace"])
-	}
-}
-
-// TestBuildInput_PropertiesBag verifies that resource properties are also available
-// under input["properties"] as a clean map without metadata keys mixed in.
-func TestBuildInput_PropertiesBag(t *testing.T) {
-	r := makeResource()
-	input := buildOPAInput(r)
-
-	props, ok := input["properties"].(map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"properties\"] to be a map")
-	}
-
-	// Properties should be accessible via the nested bag.
-	if props["acl"] != "private" {
-		t.Errorf("expected properties.acl = \"private\", got %v", props["acl"])
-	}
-
-	// The nested bag should NOT contain metadata keys.
-	for _, key := range []string{"type", "urn", "__name", "options", "provider"} {
-		if _, exists := props[key]; exists {
-			t.Errorf("expected properties bag to not contain metadata key %q", key)
+		if input["acl"] != "private" {
+			t.Errorf("expected input[\"acl\"] = \"private\", got %v", input["acl"])
 		}
-	}
 
-	// Top-level access should still work (backwards compatibility).
-	if input["acl"] != "private" {
-		t.Errorf("expected top-level acl = \"private\", got %v", input["acl"])
-	}
-}
-
-// TestBuildInput_PropertiesBagCollision verifies that when a resource has a property
-// named "properties", the resource property takes precedence (consistent with the
-// general rule that resource properties win over metadata at the top level).
-func TestBuildInput_PropertiesBagCollision(t *testing.T) {
-	r := makeResource()
-	r.Properties = resource.NewPropertyMapFromMap(map[string]any{
-		"properties": "some-value",
-		"acl":        "private",
+		sse, ok := input["serverSideEncryptionConfiguration"].(map[string]any)
+		if !ok {
+			t.Fatal("expected serverSideEncryptionConfiguration to be a map")
+		}
+		rule, ok := sse["rule"].(map[string]any)
+		if !ok {
+			t.Fatal("expected rule to be a map")
+		}
+		defaults, ok := rule["applyServerSideEncryptionByDefault"].(map[string]any)
+		if !ok {
+			t.Fatal("expected applyServerSideEncryptionByDefault to be a map")
+		}
+		if defaults["sseAlgorithm"] != "AES256" {
+			t.Errorf("expected sseAlgorithm = AES256, got %v", defaults["sseAlgorithm"])
+		}
 	})
 
-	input := buildOPAInput(r)
+	t.Run("IncludesType", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		input := buildOPAInput(r)
 
-	// The resource property "properties" should win over the metadata bag.
-	if input["properties"] != "some-value" {
-		t.Errorf("expected resource property to take precedence, got %v", input["properties"])
-	}
-}
-
-// TestBuildInput_PropertyCollision verifies that resource properties take precedence
-// over metadata fields with the same key name at the top level (backwards compatibility),
-// and that __-prefixed metadata fields are always accessible as an escape hatch.
-func TestBuildInput_PropertyCollision(t *testing.T) {
-	r := makeResource()
-	r.Type = tokens.Type("aws:s3/bucket:Bucket")
-	r.Properties = resource.NewPropertyMapFromMap(map[string]any{
-		"type": "some-property-value",
-		"acl":  "private",
+		if input["type"] != "aws:s3/bucket:Bucket" {
+			t.Errorf("expected input[\"type\"] = \"aws:s3/bucket:Bucket\", got %v", input["type"])
+		}
 	})
 
-	input := buildOPAInput(r)
+	t.Run("IncludesURN", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		input := buildOPAInput(r)
 
-	// Resource property "type" should win over the metadata "type" at top level.
-	if input["type"] != "some-property-value" {
-		t.Errorf("expected resource property to take precedence, got %v", input["type"])
-	}
+		expected := "urn:pulumi:test-stack::test-project::aws:s3/bucket:Bucket::my-bucket"
+		if input["urn"] != expected {
+			t.Errorf("expected input[\"urn\"] = %q, got %v", expected, input["urn"])
+		}
+	})
 
-	// The __type escape hatch should always return the metadata type.
-	if input["__type"] != "aws:s3/bucket:Bucket" {
-		t.Errorf("expected __type = \"aws:s3/bucket:Bucket\", got %v", input["__type"])
-	}
+	t.Run("IncludesName", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		input := buildOPAInput(r)
 
-	// Other properties should still be present.
-	if input["acl"] != "private" {
-		t.Errorf("expected acl = \"private\", got %v", input["acl"])
-	}
+		if input["name"] != "my-bucket" {
+			t.Errorf("expected input[\"name\"] = \"my-bucket\", got %v", input["name"])
+		}
+		if input["__name"] != "my-bucket" {
+			t.Errorf("expected input[\"__name\"] = \"my-bucket\", got %v", input["__name"])
+		}
+	})
+
+	t.Run("IncludesOptions", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		deleteBeforeReplace := true
+		r.Options = plugin.AnalyzerResourceOptions{
+			Protect:             true,
+			IgnoreChanges:       []string{"tags", "description"},
+			DeleteBeforeReplace: &deleteBeforeReplace,
+			AdditionalSecretOutputs: []resource.PropertyKey{
+				resource.PropertyKey("connectionString"),
+			},
+			AliasURNs: []resource.URN{
+				resource.URN("urn:pulumi:stack::proj::type::old-name"),
+			},
+			Aliases: []resource.Alias{
+				{
+					URN:  resource.URN("urn:pulumi:stack::proj::type::old-alias"),
+					Name: "old-alias",
+					Type: "old:type",
+				},
+			},
+			CustomTimeouts: resource.CustomTimeouts{
+				Create: 300,
+				Update: 120,
+				Delete: 60,
+			},
+			Parent: resource.URN("urn:pulumi:stack::proj::type::parent-resource"),
+		}
+
+		input := buildOPAInput(r)
+
+		opts, ok := input["options"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"options\"] to be a map")
+		}
+
+		if opts["protect"] != true {
+			t.Errorf("expected options.protect = true, got %v", opts["protect"])
+		}
+
+		ignoreChanges, ok := opts["ignoreChanges"].([]string)
+		if !ok {
+			t.Fatal("expected options.ignoreChanges to be []string")
+		}
+		if len(ignoreChanges) != 2 || ignoreChanges[0] != "tags" || ignoreChanges[1] != "description" {
+			t.Errorf("expected options.ignoreChanges = [\"tags\", \"description\"], got %v", ignoreChanges)
+		}
+
+		dbr, ok := opts["deleteBeforeReplace"].(*bool)
+		if !ok {
+			t.Fatal("expected options.deleteBeforeReplace to be *bool")
+		}
+		if dbr == nil || *dbr != true {
+			t.Errorf("expected options.deleteBeforeReplace = true, got %v", opts["deleteBeforeReplace"])
+		}
+
+		secretOutputs, ok := opts["additionalSecretOutputs"].([]string)
+		if !ok {
+			t.Fatal("expected options.additionalSecretOutputs to be []string")
+		}
+		if len(secretOutputs) != 1 || secretOutputs[0] != "connectionString" {
+			t.Errorf("expected additionalSecretOutputs = [\"connectionString\"], got %v", secretOutputs)
+		}
+
+		aliasURNs, ok := opts["aliasURNs"].([]string)
+		if !ok {
+			t.Fatal("expected options.aliasURNs to be []string")
+		}
+		if len(aliasURNs) != 1 || aliasURNs[0] != "urn:pulumi:stack::proj::type::old-name" {
+			t.Errorf("expected aliasURNs = [\"urn:pulumi:stack::proj::type::old-name\"], got %v", aliasURNs)
+		}
+
+		aliases, ok := opts["aliases"].([]map[string]any)
+		if !ok {
+			t.Fatal("expected options.aliases to be []map[string]any")
+		}
+		if len(aliases) != 1 {
+			t.Fatalf("expected 1 alias, got %d", len(aliases))
+		}
+		if aliases[0]["urn"] != "urn:pulumi:stack::proj::type::old-alias" {
+			t.Errorf("expected alias.urn, got %v", aliases[0]["urn"])
+		}
+		if aliases[0]["name"] != "old-alias" {
+			t.Errorf("expected alias.name = \"old-alias\", got %v", aliases[0]["name"])
+		}
+		if aliases[0]["type"] != "old:type" {
+			t.Errorf("expected alias.type = \"old:type\", got %v", aliases[0]["type"])
+		}
+
+		timeouts, ok := opts["customTimeouts"].(map[string]any)
+		if !ok {
+			t.Fatal("expected options.customTimeouts to be a map")
+		}
+		if timeouts["create"] != float64(300) {
+			t.Errorf("expected customTimeouts.create = 300, got %v", timeouts["create"])
+		}
+		if timeouts["update"] != float64(120) {
+			t.Errorf("expected customTimeouts.update = 120, got %v", timeouts["update"])
+		}
+		if timeouts["delete"] != float64(60) {
+			t.Errorf("expected customTimeouts.delete = 60, got %v", timeouts["delete"])
+		}
+
+		if opts["parent"] != "urn:pulumi:stack::proj::type::parent-resource" {
+			t.Errorf("expected options.parent, got %v", opts["parent"])
+		}
+	})
+
+	t.Run("IncludesProvider", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Provider = &plugin.AnalyzerProviderResource{
+			URN:  resource.URN("urn:pulumi:stack::proj::pulumi:providers:aws::my-provider"),
+			Type: tokens.Type("pulumi:providers:aws"),
+			Name: "my-provider",
+			Properties: resource.NewPropertyMapFromMap(map[string]any{
+				"region": "us-west-2",
+			}),
+		}
+
+		input := buildOPAInput(r)
+
+		prov, ok := input["provider"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"provider\"] to be a map")
+		}
+		if prov["type"] != "pulumi:providers:aws" {
+			t.Errorf("expected provider.type = \"pulumi:providers:aws\", got %v", prov["type"])
+		}
+		if prov["name"] != "my-provider" {
+			t.Errorf("expected provider.name = \"my-provider\", got %v", prov["name"])
+		}
+		if prov["urn"] != "urn:pulumi:stack::proj::pulumi:providers:aws::my-provider" {
+			t.Errorf("expected provider.urn, got %v", prov["urn"])
+		}
+
+		provProps, ok := prov["properties"].(map[string]any)
+		if !ok {
+			t.Fatal("expected provider.properties to be a map")
+		}
+		if provProps["region"] != "us-west-2" {
+			t.Errorf("expected provider.properties.region = \"us-west-2\", got %v", provProps["region"])
+		}
+	})
+
+	t.Run("NilProvider", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Provider = nil
+
+		input := buildOPAInput(r)
+
+		prov, ok := input["provider"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"provider\"] to be an empty map when Provider is nil")
+		}
+		if len(prov) != 0 {
+			t.Errorf("expected empty provider map, got %v", prov)
+		}
+
+		// __provider should also be present and empty.
+		dprov, ok := input["__provider"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"__provider\"] to be an empty map when Provider is nil")
+		}
+		if len(dprov) != 0 {
+			t.Errorf("expected empty __provider map, got %v", dprov)
+		}
+	})
+
+	t.Run("EmptyOptions", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Options = plugin.AnalyzerResourceOptions{}
+
+		input := buildOPAInput(r)
+
+		opts, ok := input["options"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"options\"] to be a map")
+		}
+
+		if opts["protect"] != false {
+			t.Errorf("expected options.protect = false, got %v", opts["protect"])
+		}
+		if opts["parent"] != "" {
+			t.Errorf("expected options.parent = \"\", got %v", opts["parent"])
+		}
+		if opts["deleteBeforeReplace"] != (*bool)(nil) {
+			t.Errorf("expected options.deleteBeforeReplace = nil, got %v", opts["deleteBeforeReplace"])
+		}
+	})
+
+	t.Run("PropertiesBag", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		input := buildOPAInput(r)
+
+		props, ok := input["properties"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"properties\"] to be a map")
+		}
+
+		// Properties should be accessible via the nested bag.
+		if props["acl"] != "private" {
+			t.Errorf("expected properties.acl = \"private\", got %v", props["acl"])
+		}
+
+		// The nested bag should NOT contain metadata keys.
+		for _, key := range []string{"type", "urn", "__name", "options", "provider"} {
+			if _, exists := props[key]; exists {
+				t.Errorf("expected properties bag to not contain metadata key %q", key)
+			}
+		}
+
+		// Top-level access should still work (backwards compatibility).
+		if input["acl"] != "private" {
+			t.Errorf("expected top-level acl = \"private\", got %v", input["acl"])
+		}
+	})
+
+	t.Run("PropertiesBagCollision", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Properties = resource.NewPropertyMapFromMap(map[string]any{
+			"properties": "some-value",
+			"acl":        "private",
+		})
+
+		input := buildOPAInput(r)
+
+		// The resource property "properties" should win over the metadata bag.
+		if input["properties"] != "some-value" {
+			t.Errorf("expected resource property to take precedence, got %v", input["properties"])
+		}
+	})
+
+	t.Run("PropertyCollision", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Type = tokens.Type("aws:s3/bucket:Bucket")
+		r.Properties = resource.NewPropertyMapFromMap(map[string]any{
+			"type": "some-property-value",
+			"acl":  "private",
+		})
+
+		input := buildOPAInput(r)
+
+		// Resource property "type" should win over the metadata "type" at top level.
+		if input["type"] != "some-property-value" {
+			t.Errorf("expected resource property to take precedence, got %v", input["type"])
+		}
+
+		// The __type escape hatch should always return the metadata type.
+		if input["__type"] != "aws:s3/bucket:Bucket" {
+			t.Errorf("expected __type = \"aws:s3/bucket:Bucket\", got %v", input["__type"])
+		}
+
+		// Other properties should still be present.
+		if input["acl"] != "private" {
+			t.Errorf("expected acl = \"private\", got %v", input["acl"])
+		}
+	})
+
+	t.Run("PrefixedMetadata", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Provider = &plugin.AnalyzerProviderResource{
+			URN:  resource.URN("urn:pulumi:stack::proj::pulumi:providers:aws::my-provider"),
+			Type: tokens.Type("pulumi:providers:aws"),
+			Name: "my-provider",
+			Properties: resource.NewPropertyMapFromMap(map[string]any{
+				"region": "us-west-2",
+			}),
+		}
+
+		input := buildOPAInput(r)
+
+		if input["__type"] != "aws:s3/bucket:Bucket" {
+			t.Errorf("expected __type = \"aws:s3/bucket:Bucket\", got %v", input["__type"])
+		}
+
+		expectedURN := "urn:pulumi:test-stack::test-project::aws:s3/bucket:Bucket::my-bucket"
+		if input["__urn"] != expectedURN {
+			t.Errorf("expected __urn = %q, got %v", expectedURN, input["__urn"])
+		}
+
+		if input["__name"] != "my-bucket" {
+			t.Errorf("expected __name = \"my-bucket\", got %v", input["__name"])
+		}
+
+		opts, ok := input["__options"].(map[string]any)
+		if !ok {
+			t.Fatal("expected __options to be a map")
+		}
+		if opts["protect"] != false {
+			t.Errorf("expected __options.protect = false, got %v", opts["protect"])
+		}
+
+		props, ok := input["__properties"].(map[string]any)
+		if !ok {
+			t.Fatal("expected __properties to be a map")
+		}
+		if props["acl"] != "private" {
+			t.Errorf("expected __properties.acl = \"private\", got %v", props["acl"])
+		}
+
+		prov, ok := input["__provider"].(map[string]any)
+		if !ok {
+			t.Fatal("expected __provider to be a map")
+		}
+		if prov["name"] != "my-provider" {
+			t.Errorf("expected __provider.name = \"my-provider\", got %v", prov["name"])
+		}
+	})
+
+	t.Run("EmptyProperties", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Properties = resource.NewPropertyMapFromMap(map[string]any{})
+
+		input := buildOPAInput(r)
+
+		// Metadata fields should be present.
+		if input["type"] != "aws:s3/bucket:Bucket" {
+			t.Errorf("expected type field, got %v", input["type"])
+		}
+		if input["urn"] == nil {
+			t.Error("expected urn field to be present")
+		}
+		if input["__name"] != "my-bucket" {
+			t.Errorf("expected __name field, got %v", input["__name"])
+		}
+		if input["options"] == nil {
+			t.Error("expected options field to be present")
+		}
+	})
 }
 
-// TestBuildInput_PrefixedMetadata verifies that __-prefixed metadata fields are
-// always present and contain the correct values regardless of property collisions.
-func TestBuildInput_PrefixedMetadata(t *testing.T) {
-	r := makeResource()
-	r.Provider = &plugin.AnalyzerProviderResource{
-		URN:  resource.URN("urn:pulumi:stack::proj::pulumi:providers:aws::my-provider"),
-		Type: tokens.Type("pulumi:providers:aws"),
-		Name: "my-provider",
-		Properties: resource.NewPropertyMapFromMap(map[string]any{
-			"region": "us-west-2",
-		}),
-	}
+func TestBuildStackInput(t *testing.T) {
+	t.Parallel()
 
-	input := buildOPAInput(r)
+	t.Run("BasicResources", func(t *testing.T) {
+		t.Parallel()
+		resources := []plugin.AnalyzerStackResource{
+			makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
+				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
+			makeStackResource("bucket-2", "aws:s3/bucket:Bucket",
+				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
+		}
 
-	if input["__type"] != "aws:s3/bucket:Bucket" {
-		t.Errorf("expected __type = \"aws:s3/bucket:Bucket\", got %v", input["__type"])
-	}
+		input := buildStackOPAInput(resources)
 
-	expectedURN := "urn:pulumi:test-stack::test-project::aws:s3/bucket:Bucket::my-bucket"
-	if input["__urn"] != expectedURN {
-		t.Errorf("expected __urn = %q, got %v", expectedURN, input["__urn"])
-	}
+		resList, ok := input["resources"].([]map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"resources\"] to be []map[string]any")
+		}
+		if len(resList) != 2 {
+			t.Fatalf("expected 2 resources, got %d", len(resList))
+		}
 
-	if input["__name"] != "my-bucket" {
-		t.Errorf("expected __name = \"my-bucket\", got %v", input["__name"])
-	}
+		// Verify enriched fields on first resource.
+		if resList[0]["__name"] != "bucket-1" {
+			t.Errorf("expected __name = bucket-1, got %v", resList[0]["__name"])
+		}
+		if resList[0]["type"] != "aws:s3/bucket:Bucket" {
+			t.Errorf("expected type = aws:s3/bucket:Bucket, got %v", resList[0]["type"])
+		}
+		if resList[0]["urn"] != "urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1" {
+			t.Errorf("expected correct urn, got %v", resList[0]["urn"])
+		}
+		if resList[0]["acl"] != "private" {
+			t.Errorf("expected acl = private, got %v", resList[0]["acl"])
+		}
 
-	opts, ok := input["__options"].(map[string]any)
-	if !ok {
-		t.Fatal("expected __options to be a map")
-	}
-	if opts["protect"] != false {
-		t.Errorf("expected __options.protect = false, got %v", opts["protect"])
-	}
+		// Verify second resource.
+		if resList[1]["__name"] != "bucket-2" {
+			t.Errorf("expected __name = bucket-2, got %v", resList[1]["__name"])
+		}
+	})
 
-	props, ok := input["__properties"].(map[string]any)
-	if !ok {
-		t.Fatal("expected __properties to be a map")
-	}
-	if props["acl"] != "private" {
-		t.Errorf("expected __properties.acl = \"private\", got %v", props["acl"])
-	}
+	t.Run("IncludesDependencies", func(t *testing.T) {
+		t.Parallel()
+		sr := makeStackResource("my-instance", "aws:ec2/instance:Instance",
+			"urn:pulumi:stack::proj::aws:ec2/instance:Instance::my-instance")
+		sr.Dependencies = []resource.URN{
+			resource.URN("urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg"),
+			resource.URN("urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet"),
+		}
 
-	prov, ok := input["__provider"].(map[string]any)
-	if !ok {
-		t.Fatal("expected __provider to be a map")
-	}
-	if prov["name"] != "my-provider" {
-		t.Errorf("expected __provider.name = \"my-provider\", got %v", prov["name"])
-	}
-}
+		input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
 
-// TestBuildInput_EmptyProperties verifies that with no properties, only metadata is present.
-func TestBuildInput_EmptyProperties(t *testing.T) {
-	r := makeResource()
-	r.Properties = resource.NewPropertyMapFromMap(map[string]any{})
+		resList := input["resources"].([]map[string]any)
+		deps, ok := resList[0]["dependencies"].([]string)
+		if !ok {
+			t.Fatal("expected dependencies to be []string")
+		}
+		if len(deps) != 2 {
+			t.Fatalf("expected 2 dependencies, got %d", len(deps))
+		}
+		if deps[0] != "urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg" {
+			t.Errorf("unexpected dependency[0]: %s", deps[0])
+		}
+		if deps[1] != "urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet" {
+			t.Errorf("unexpected dependency[1]: %s", deps[1])
+		}
+	})
 
-	input := buildOPAInput(r)
+	t.Run("IncludesPropertyDependencies", func(t *testing.T) {
+		t.Parallel()
+		sr := makeStackResource("my-instance", "aws:ec2/instance:Instance",
+			"urn:pulumi:stack::proj::aws:ec2/instance:Instance::my-instance")
+		sr.PropertyDependencies = map[resource.PropertyKey][]resource.URN{
+			resource.PropertyKey("securityGroups"): {
+				resource.URN("urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::sg-1"),
+			},
+			resource.PropertyKey("subnetId"): {
+				resource.URN("urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::subnet-1"),
+			},
+		}
 
-	// Metadata fields should be present.
-	if input["type"] != "aws:s3/bucket:Bucket" {
-		t.Errorf("expected type field, got %v", input["type"])
-	}
-	if input["urn"] == nil {
-		t.Error("expected urn field to be present")
-	}
-	if input["__name"] != "my-bucket" {
-		t.Errorf("expected __name field, got %v", input["__name"])
-	}
-	if input["options"] == nil {
-		t.Error("expected options field to be present")
-	}
-}
+		input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
 
-// --- Stack input tests ---
+		resList := input["resources"].([]map[string]any)
+		propDeps, ok := resList[0]["propertyDependencies"].(map[string][]string)
+		if !ok {
+			t.Fatal("expected propertyDependencies to be map[string][]string")
+		}
+		if len(propDeps) != 2 {
+			t.Fatalf("expected 2 property dependency entries, got %d", len(propDeps))
+		}
 
-// TestBuildStackInput_BasicResources verifies that buildStackOPAInput creates a
-// resources array with enriched fields for each resource.
-func TestBuildStackInput_BasicResources(t *testing.T) {
-	resources := []plugin.AnalyzerStackResource{
-		makeStackResource("bucket-1", "aws:s3/bucket:Bucket",
-			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
-		makeStackResource("bucket-2", "aws:s3/bucket:Bucket",
-			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
-	}
+		sgDeps, ok := propDeps["securityGroups"]
+		if !ok || len(sgDeps) != 1 {
+			t.Fatalf("expected 1 securityGroups dependency, got %v", sgDeps)
+		}
+		if sgDeps[0] != "urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::sg-1" {
+			t.Errorf("unexpected securityGroups dependency: %s", sgDeps[0])
+		}
+	})
 
-	input := buildStackOPAInput(resources)
+	t.Run("EmptyResources", func(t *testing.T) {
+		t.Parallel()
+		input := buildStackOPAInput([]plugin.AnalyzerStackResource{})
 
-	resList, ok := input["resources"].([]map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"resources\"] to be []map[string]any")
-	}
-	if len(resList) != 2 {
-		t.Fatalf("expected 2 resources, got %d", len(resList))
-	}
+		resList, ok := input["resources"].([]map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"resources\"] to be []map[string]any, not nil")
+		}
+		if len(resList) != 0 {
+			t.Errorf("expected 0 resources, got %d", len(resList))
+		}
+	})
 
-	// Verify enriched fields on first resource.
-	if resList[0]["__name"] != "bucket-1" {
-		t.Errorf("expected __name = bucket-1, got %v", resList[0]["__name"])
-	}
-	if resList[0]["type"] != "aws:s3/bucket:Bucket" {
-		t.Errorf("expected type = aws:s3/bucket:Bucket, got %v", resList[0]["type"])
-	}
-	if resList[0]["urn"] != "urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1" {
-		t.Errorf("expected correct urn, got %v", resList[0]["urn"])
-	}
-	if resList[0]["acl"] != "private" {
-		t.Errorf("expected acl = private, got %v", resList[0]["acl"])
-	}
+	t.Run("ParentOverride", func(t *testing.T) {
+		t.Parallel()
+		sr := makeStackResource("child", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::child")
+		sr.Options.Parent = resource.URN("urn:pulumi:stack::proj::type::options-parent")
+		sr.Parent = resource.URN("urn:pulumi:stack::proj::type::stack-parent")
 
-	// Verify second resource.
-	if resList[1]["__name"] != "bucket-2" {
-		t.Errorf("expected __name = bucket-2, got %v", resList[1]["__name"])
-	}
-}
+		input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
 
-// TestBuildStackInput_IncludesDependencies verifies that resource dependencies
-// are included as string arrays.
-func TestBuildStackInput_IncludesDependencies(t *testing.T) {
-	sr := makeStackResource("my-instance", "aws:ec2/instance:Instance",
-		"urn:pulumi:stack::proj::aws:ec2/instance:Instance::my-instance")
-	sr.Dependencies = []resource.URN{
-		resource.URN("urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg"),
-		resource.URN("urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet"),
-	}
+		resList := input["resources"].([]map[string]any)
+		opts := resList[0]["options"].(map[string]any)
+		if opts["parent"] != "urn:pulumi:stack::proj::type::stack-parent" {
+			t.Errorf("expected parent to be overridden to stack-parent, got %v", opts["parent"])
+		}
+	})
 
-	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
+	t.Run("NilDependencies", func(t *testing.T) {
+		t.Parallel()
+		sr := makeStackResource("my-bucket", "aws:s3/bucket:Bucket",
+			"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::my-bucket")
+		sr.Dependencies = nil
+		sr.PropertyDependencies = nil
 
-	resList := input["resources"].([]map[string]any)
-	deps, ok := resList[0]["dependencies"].([]string)
-	if !ok {
-		t.Fatal("expected dependencies to be []string")
-	}
-	if len(deps) != 2 {
-		t.Fatalf("expected 2 dependencies, got %d", len(deps))
-	}
-	if deps[0] != "urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::my-sg" {
-		t.Errorf("unexpected dependency[0]: %s", deps[0])
-	}
-	if deps[1] != "urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::my-subnet" {
-		t.Errorf("unexpected dependency[1]: %s", deps[1])
-	}
-}
+		input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
 
-// TestBuildStackInput_IncludesPropertyDependencies verifies that per-property
-// dependencies are included as map[string][]string.
-func TestBuildStackInput_IncludesPropertyDependencies(t *testing.T) {
-	sr := makeStackResource("my-instance", "aws:ec2/instance:Instance",
-		"urn:pulumi:stack::proj::aws:ec2/instance:Instance::my-instance")
-	sr.PropertyDependencies = map[resource.PropertyKey][]resource.URN{
-		resource.PropertyKey("securityGroups"): {
-			resource.URN("urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::sg-1"),
-		},
-		resource.PropertyKey("subnetId"): {
-			resource.URN("urn:pulumi:stack::proj::aws:ec2/subnet:Subnet::subnet-1"),
-		},
-	}
-
-	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
-
-	resList := input["resources"].([]map[string]any)
-	propDeps, ok := resList[0]["propertyDependencies"].(map[string][]string)
-	if !ok {
-		t.Fatal("expected propertyDependencies to be map[string][]string")
-	}
-	if len(propDeps) != 2 {
-		t.Fatalf("expected 2 property dependency entries, got %d", len(propDeps))
-	}
-
-	sgDeps, ok := propDeps["securityGroups"]
-	if !ok || len(sgDeps) != 1 {
-		t.Fatalf("expected 1 securityGroups dependency, got %v", sgDeps)
-	}
-	if sgDeps[0] != "urn:pulumi:stack::proj::aws:ec2/securityGroup:SecurityGroup::sg-1" {
-		t.Errorf("unexpected securityGroups dependency: %s", sgDeps[0])
-	}
-}
-
-// TestBuildStackInput_EmptyResources verifies that an empty slice produces an
-// input with an empty (non-nil) resources array so that OPA receives [] not null.
-func TestBuildStackInput_EmptyResources(t *testing.T) {
-	input := buildStackOPAInput([]plugin.AnalyzerStackResource{})
-
-	resList, ok := input["resources"].([]map[string]any)
-	if !ok {
-		t.Fatal("expected input[\"resources\"] to be []map[string]any, not nil")
-	}
-	if len(resList) != 0 {
-		t.Errorf("expected 0 resources, got %d", len(resList))
-	}
-}
-
-// TestBuildStackInput_ParentOverride verifies that AnalyzerStackResource.Parent
-// overrides Options.Parent when non-empty.
-func TestBuildStackInput_ParentOverride(t *testing.T) {
-	sr := makeStackResource("child", "aws:s3/bucket:Bucket",
-		"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::child")
-	sr.Options.Parent = resource.URN("urn:pulumi:stack::proj::type::options-parent")
-	sr.Parent = resource.URN("urn:pulumi:stack::proj::type::stack-parent")
-
-	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
-
-	resList := input["resources"].([]map[string]any)
-	opts := resList[0]["options"].(map[string]any)
-	if opts["parent"] != "urn:pulumi:stack::proj::type::stack-parent" {
-		t.Errorf("expected parent to be overridden to stack-parent, got %v", opts["parent"])
-	}
-}
-
-// TestBuildStackInput_NilDependencies verifies that nil Dependencies and
-// PropertyDependencies result in those fields being absent from the output.
-func TestBuildStackInput_NilDependencies(t *testing.T) {
-	sr := makeStackResource("my-bucket", "aws:s3/bucket:Bucket",
-		"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::my-bucket")
-	sr.Dependencies = nil
-	sr.PropertyDependencies = nil
-
-	input := buildStackOPAInput([]plugin.AnalyzerStackResource{sr})
-
-	resList := input["resources"].([]map[string]any)
-	if _, exists := resList[0]["dependencies"]; exists {
-		t.Error("expected dependencies to be absent when nil")
-	}
-	if _, exists := resList[0]["propertyDependencies"]; exists {
-		t.Error("expected propertyDependencies to be absent when nil")
-	}
+		resList := input["resources"].([]map[string]any)
+		if _, exists := resList[0]["dependencies"]; exists {
+			t.Error("expected dependencies to be absent when nil")
+		}
+		if _, exists := resList[0]["propertyDependencies"]; exists {
+			t.Error("expected propertyDependencies to be absent when nil")
+		}
+	})
 }
