@@ -332,7 +332,7 @@ deny[msg] {
 
 	pack, _, loadErr := loadPolicyPack(dir)
 
-	w.Close()
+	_ = w.Close()
 	os.Stderr = origStderr
 
 	stderrBytes, _ := io.ReadAll(r)
