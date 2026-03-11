@@ -15,6 +15,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,9 +27,13 @@ import (
 
 // Rego modules contain rules, some of which have prefixes. Only those with the appropriate
 // prefix will be considered rules for evaluation -- all others are used as library routines.
+// Resource-level rules are evaluated per-resource via Analyze().
+// Stack-level rules (stack_ prefix) are evaluated once for the entire stack via AnalyzeStack().
 var (
-	denyRulePrefix = regexp.MustCompile("^(deny|violation)(_[a-zA-Z]+)*$")
-	warnRulePrefix = regexp.MustCompile("^warn(_[a-zA-Z]+)*$")
+	denyRulePrefix      = regexp.MustCompile("^(deny|violation)(_[a-zA-Z0-9]+)*$")
+	warnRulePrefix      = regexp.MustCompile("^warn(_[a-zA-Z0-9]+)*$")
+	stackDenyRulePrefix = regexp.MustCompile("^stack_(deny|violation)(_[a-zA-Z0-9]+)*$")
+	stackWarnRulePrefix = regexp.MustCompile("^stack_warn(_[a-zA-Z0-9]+)*$")
 )
 
 // loadPolicyPack loads the metadata about a pack and its policies from a directory containing OPA *.rego files.
@@ -79,6 +84,7 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	// Buld up a list of rules.
 	var packName string
 	var policies []*policyRule
+	existing := make(map[string]struct{})
 	for name, module := range compiler.Modules {
 		// First determine the package name. This should match for all rules.
 		pkg := module.Package.String()
@@ -93,30 +99,43 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 		}
 
 		// Next go through all rules and tease them apart, skipping duplicates.
-		existing := make(map[string]bool)
 		for _, rule := range module.Rules {
 			ruleName := rule.Head.Name.String()
 
 			// Only process those that are legitimate errors or warnings. Other "rules" are
 			// actually just libraries that can be used as routines in authoring other rules.
+			// Check stack-level prefixes before resource-level prefixes since
+			// stack_deny/stack_warn are distinct from deny/warn.
 			var level enforcementLevel
-			if denyRulePrefix.MatchString(ruleName) {
+			var scope policyScope
+			if stackDenyRulePrefix.MatchString(ruleName) {
 				level = mandatoryRule
+				scope = stackScope
+			} else if stackWarnRulePrefix.MatchString(ruleName) {
+				level = advisoryRule
+				scope = stackScope
+			} else if denyRulePrefix.MatchString(ruleName) {
+				level = mandatoryRule
+				scope = resourceScope
 			} else if warnRulePrefix.MatchString(ruleName) {
 				level = advisoryRule
+				scope = resourceScope
 			} else {
 				continue // skip
 			}
 
-			if _, has := existing[ruleName]; !has {
-				existing[ruleName] = true
-				policies = append(policies, &policyRule{
-					Name:        ruleName,
-					DisplayName: name,
-					// TODO: Description, Message
-					Level: level,
-				})
+			if _, has := existing[ruleName]; has {
+				fmt.Fprintf(os.Stderr, "warning: duplicate rule %q in module %q, skipping\n", ruleName, name)
+				continue
 			}
+			existing[ruleName] = struct{}{}
+			policies = append(policies, &policyRule{
+				Name:        ruleName,
+				DisplayName: name,
+				// TODO: Description, Message
+				Level: level,
+				Scope: scope,
+			})
 		}
 	}
 
@@ -147,6 +166,7 @@ type policyRule struct {
 	Description string           `json:"description"`
 	Message     string           `json:"message"`
 	Level       enforcementLevel `json:"enforcementLevel"`
+	Scope       policyScope      `json:"scope"`
 }
 
 type enforcementLevel int
@@ -154,4 +174,11 @@ type enforcementLevel int
 const (
 	advisoryRule  enforcementLevel = 0
 	mandatoryRule enforcementLevel = 1
+)
+
+type policyScope int
+
+const (
+	resourceScope policyScope = 0
+	stackScope    policyScope = 1
 )

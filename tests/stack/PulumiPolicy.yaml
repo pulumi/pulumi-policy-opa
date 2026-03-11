@@ -1,0 +1,2 @@
+description: Stack-level Policy Pack for testing OPA stack policies
+runtime: opa

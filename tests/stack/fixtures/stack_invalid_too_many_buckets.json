@@ -1,0 +1,60 @@
+{
+  "resources": [
+    {
+      "__name": "bucket-1",
+      "type": "aws:s3/bucket:Bucket",
+      "urn": "urn:pulumi:prod::proj::aws:s3/bucket:Bucket::bucket-1",
+      "acl": "private",
+      "serverSideEncryptionConfiguration": {
+        "rule": {
+          "applyServerSideEncryptionByDefault": {
+            "sseAlgorithm": "AES256"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    {
+      "__name": "bucket-2",
+      "type": "aws:s3/bucket:Bucket",
+      "urn": "urn:pulumi:prod::proj::aws:s3/bucket:Bucket::bucket-2",
+      "acl": "private",
+      "serverSideEncryptionConfiguration": {
+        "rule": {
+          "applyServerSideEncryptionByDefault": {
+            "sseAlgorithm": "AES256"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    {
+      "__name": "bucket-3",
+      "type": "aws:s3/bucket:Bucket",
+      "urn": "urn:pulumi:prod::proj::aws:s3/bucket:Bucket::bucket-3",
+      "acl": "private",
+      "serverSideEncryptionConfiguration": {
+        "rule": {
+          "applyServerSideEncryptionByDefault": {
+            "sseAlgorithm": "AES256"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    {
+      "__name": "bucket-4",
+      "type": "aws:s3/bucket:Bucket",
+      "urn": "urn:pulumi:prod::proj::aws:s3/bucket:Bucket::bucket-4",
+      "acl": "private",
+      "serverSideEncryptionConfiguration": {
+        "rule": {
+          "applyServerSideEncryptionByDefault": {
+            "sseAlgorithm": "AES256"
+          }
+        }
+      },
+      "dependencies": []
+    }
+  ]
+}

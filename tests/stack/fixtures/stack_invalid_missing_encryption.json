@@ -1,0 +1,25 @@
+{
+  "resources": [
+    {
+      "__name": "encrypted-bucket",
+      "type": "aws:s3/bucket:Bucket",
+      "urn": "urn:pulumi:prod::proj::aws:s3/bucket:Bucket::encrypted-bucket",
+      "acl": "private",
+      "serverSideEncryptionConfiguration": {
+        "rule": {
+          "applyServerSideEncryptionByDefault": {
+            "sseAlgorithm": "AES256"
+          }
+        }
+      },
+      "dependencies": []
+    },
+    {
+      "__name": "unencrypted-bucket",
+      "type": "aws:s3/bucket:Bucket",
+      "urn": "urn:pulumi:prod::proj::aws:s3/bucket:Bucket::unencrypted-bucket",
+      "acl": "private",
+      "dependencies": []
+    }
+  ]
+}
