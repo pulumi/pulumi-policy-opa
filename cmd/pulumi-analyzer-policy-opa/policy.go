@@ -171,12 +171,12 @@ type policyPack struct {
 
 // policyRule holds the metadata for a Pulumi policy rule, in addition to the OPA rule authored in *.rego.
 type policyRule struct {
-	Name         string                          `json:"name"`
-	DisplayName  string                          `json:"displayName"`
-	Description  string                          `json:"description"`
-	Message      string                          `json:"message"`
-	Level        enforcementLevel                `json:"enforcementLevel"`
-	Scope        policyScope                     `json:"scope"`
+	Name         string                             `json:"name"`
+	DisplayName  string                             `json:"displayName"`
+	Description  string                             `json:"description"`
+	Message      string                             `json:"message"`
+	Level        enforcementLevel                   `json:"enforcementLevel"`
+	Scope        policyScope                        `json:"scope"`
 	ConfigSchema *plugin.AnalyzerPolicyConfigSchema `json:"configSchema,omitempty"`
 }
 

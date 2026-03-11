@@ -671,4 +671,3 @@ stack_deny[msg] {
 
 // TestEval_NonStringRuleValue verifies that non-string values returned by OPA
 // rules (e.g., integers) are converted to strings instead of causing a panic.
-

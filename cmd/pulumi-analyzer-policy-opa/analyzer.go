@@ -36,7 +36,7 @@ type analyzer struct {
 	pack          *policyPack
 	e             *evaler
 	policyConfig  map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
-	configChecked bool                                    // guards one-time missing-config warning
+	configChecked bool                                   // guards one-time missing-config warning
 }
 
 func NewAnalyzer(
