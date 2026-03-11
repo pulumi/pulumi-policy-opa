@@ -1,0 +1,11 @@
+{
+    "deny_large_instances": {
+        "properties": {
+            "maxInstanceSize": {
+                "type": "string",
+                "default": "m5.xlarge"
+            }
+        },
+        "required": ["maxInstanceSize"]
+    }
+}

@@ -52,6 +52,10 @@ pulumi preview --policy-pack ./policies
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Policy Examples](#policy-examples)
+- [Resource Input Structure](#resource-input-structure)
+- [Stack-Level Policies](#stack-level-policies)
+- [Policy Configuration](#policy-configuration)
+- [Policy Metadata (OPA Annotations)](#policy-metadata-opa-annotations)
 - [Using with Your Pulumi Projects](#using-with-your-pulumi-projects)
 - [Testing Your Policies](#testing-your-policies)
 - [Policy Pack Structure](#policy-pack-structure)
@@ -257,6 +261,248 @@ deny[msg] {
 
 ---
 
+## Resource Input Structure
+
+When OPA evaluates a policy, the `input` object contains both the resource's own properties and additional metadata about the resource. This gives policies full access to the resource context provided by Pulumi.
+
+### Top-Level Fields
+
+Resource properties are overlaid at the top level for backwards compatibility:
+
+```rego
+# Access resource properties directly
+input.acl              # e.g. "public-read"
+input.bucketName       # e.g. "my-bucket"
+```
+
+### Metadata Fields
+
+The following metadata fields are also available at the top level. If a resource property has the same key as a metadata field, the property takes precedence. Use the `__`-prefixed versions for guaranteed access:
+
+| Field | Collision-Safe | Description |
+|-------|---------------|-------------|
+| `input.type` | `input.__type` | Resource type (e.g. `aws:s3/bucket:Bucket`) |
+| `input.urn` | `input.__urn` | Resource URN |
+| `input.name` | `input.__name` | Resource logical name |
+| `input.options` | `input.__options` | Resource options (see below) |
+| `input.provider` | `input.__provider` | Provider information (see below) |
+| `input.properties` | `input.__properties` | Nested properties bag |
+
+### Resource Options
+
+Access deployment options via `input.options` (or `input.__options`):
+
+```rego
+# Require protection on production resources
+deny[msg] {
+    contains(lower(input.__name), "prod")
+    not input.options.protect
+    msg := sprintf("Production resource '%s' must have protect enabled", [input.__name])
+}
+```
+
+Available options fields:
+- `protect` - Whether the resource is protected from deletion
+- `ignoreChanges` - List of properties to ignore during updates
+- `deleteBeforeReplace` - Whether to delete before replacing
+- `additionalSecretOutputs` - Additional secret output properties
+- `aliasURNs` - Alias URNs for the resource
+- `aliases` - Alias definitions (with `urn`, `name`, `type`, `project`, `stack`, `parent`, `noParent`)
+- `customTimeouts` - Custom timeouts (`create`, `update`, `delete`)
+- `parent` - Parent resource URN
+
+### Provider Information
+
+Access provider details via `input.provider` (or `input.__provider`):
+
+```rego
+# Warn if using default provider
+warn[msg] {
+    input.provider
+    contains(input.provider.name, "default")
+    msg := sprintf("Resource '%s' is using the default provider", [input.__name])
+}
+```
+
+Available provider fields: `type`, `name`, `urn`, `properties`
+
+### Nested Properties Bag
+
+Access properties without metadata collisions via `input.properties` (or `input.__properties`):
+
+```rego
+# Access a property that might collide with a metadata field name
+deny[msg] {
+    input.properties.type == "dangerous-value"
+    msg := "The 'type' property has a dangerous value"
+}
+```
+
+---
+
+## Stack-Level Policies
+
+Stack-level policies evaluate the entire set of resources in a stack, enabling cross-resource checks like counting resources, verifying relationships, or enforcing fleet-wide standards.
+
+### Writing Stack-Level Rules
+
+Use the `stack_deny` or `stack_warn` prefix. The input contains a `resources` array with all resources in the stack:
+
+```rego
+package mypack
+
+# Limit the number of S3 buckets per stack
+stack_deny_too_many_buckets[msg] {
+    buckets := [r | r := input.resources[_]; r.type == "aws:s3/bucket:Bucket"]
+    count(buckets) > 3
+    msg := sprintf("Stack has %d S3 buckets, maximum allowed is 3", [count(buckets)])
+}
+
+# All S3 buckets must have encryption
+stack_deny_unencrypted_buckets[msg] {
+    r := input.resources[_]
+    r.type == "aws:s3/bucket:Bucket"
+    not r.serverSideEncryptionConfiguration
+    msg := sprintf("S3 bucket '%s' must have encryption enabled", [r.__name])
+}
+
+# Warn about security groups not referenced by any resource
+stack_warn_orphan_security_groups[msg] {
+    sg := input.resources[_]
+    sg.type == "aws:ec2/securityGroup:SecurityGroup"
+    all_deps := {dep | r := input.resources[_]; dep := r.dependencies[_]}
+    not all_deps[sg.urn]
+    msg := sprintf("Security group '%s' is not referenced by any resource", [sg.__name])
+}
+```
+
+### Stack Input Structure
+
+Each resource in `input.resources` contains all the same fields as a resource-level input (properties, metadata, options, provider), plus:
+
+- `dependencies` - Array of URNs this resource depends on
+- `propertyDependencies` - Map of property names to arrays of dependency URNs
+
+---
+
+## Policy Configuration
+
+Policy configuration allows you to customize policy behavior without modifying Rego code. You can override enforcement levels, disable rules, and inject custom properties.
+
+### Enforcement Level Overrides
+
+Override the default enforcement level for any rule via the Pulumi policy configuration:
+
+```json
+{
+    "deny_public_buckets": {
+        "enforcementLevel": "advisory"
+    },
+    "warn_logging": {
+        "enforcementLevel": "mandatory"
+    },
+    "deny_old_instance_types": {
+        "enforcementLevel": "disabled"
+    }
+}
+```
+
+Valid enforcement levels: `mandatory`, `advisory`, `disabled`.
+
+Use `"all"` to set a pack-wide default:
+
+```json
+{
+    "all": {
+        "enforcementLevel": "advisory"
+    },
+    "deny_public_buckets": {
+        "enforcementLevel": "mandatory"
+    }
+}
+```
+
+### Custom Configuration Properties
+
+Inject custom values into policies via `data.config.<policy_name>.<key>`:
+
+**Policy** (`policies/ec2.rego`):
+```rego
+package aws
+
+deny_large_instances[msg] {
+    input.type == "aws:ec2/instance:Instance"
+    max_size := data.config.deny_large_instances.maxInstanceSize
+    instance_sizes := {"t3.micro": 1, "t3.small": 2, "t3.medium": 3, "t3.large": 4, "t3.xlarge": 5}
+    instance_sizes[input.instanceType] > instance_sizes[max_size]
+    msg := sprintf("Instance '%s' type '%s' exceeds maximum allowed size '%s'",
+                   [input.__name, input.instanceType, max_size])
+}
+```
+
+**Configuration** (passed via Pulumi):
+```json
+{
+    "deny_large_instances": {
+        "properties": {
+            "maxInstanceSize": "t3.medium"
+        }
+    }
+}
+```
+
+### Config Schema
+
+Declare a JSON schema for each rule's configuration properties by adding a `config-schema.json` file alongside your Rego files:
+
+```json
+{
+    "deny_large_instances": {
+        "properties": {
+            "maxInstanceSize": {
+                "type": "string",
+                "default": "t3.large"
+            }
+        },
+        "required": ["maxInstanceSize"]
+    }
+}
+```
+
+Pulumi validates the configuration against this schema before evaluation. If a rule declares a config schema but no configuration is provided, the analyzer emits a warning since rules that reference `data.config` will silently not fire.
+
+---
+
+## Policy Metadata (OPA Annotations)
+
+Use OPA's `# METADATA` annotation blocks to provide rich metadata for your policies. The analyzer extracts `title`, `description`, and `custom.message` from annotations and reports them to Pulumi.
+
+```rego
+package aws
+
+# METADATA
+# title: S3 Public Access Policy
+# scope: package
+
+# METADATA
+# title: No Public S3 Buckets
+# description: S3 buckets must not use public-read or public-read-write ACLs
+# custom:
+#   message: Set the ACL to 'private' or remove it entirely
+deny_public_buckets[msg] {
+    input.type == "aws:s3/bucket:Bucket"
+    input.acl in ["public-read", "public-read-write"]
+    msg := sprintf("S3 bucket '%s' must not be publicly accessible", [input.__name])
+}
+```
+
+- **`title`** on a rule sets its `DisplayName`
+- **`description`** sets its `Description`
+- **`custom.message`** sets its `Message` (remediation guidance)
+- **`title`** with `scope: package` sets the policy pack's `DisplayName`
+
+---
+
 ## Using with Your Pulumi Projects
 
 ### Method 1: Local Policy Pack (Development)
@@ -369,6 +615,7 @@ opa eval --data policies/ --input test-fixtures/invalid-s3.json "data.aws.deny"
 ```
 my-policies/
 ├── PulumiPolicy.yaml         # Policy pack metadata
+├── config-schema.json        # Optional: config schemas for configurable rules
 ├── aws/
 │   ├── s3.rego              # S3 security policies
 │   ├── ec2.rego             # EC2 & security groups
@@ -398,10 +645,19 @@ package aws
 package aws.s3  # This won't work
 ```
 
-### Policy Severity
+### Rule Prefixes and Severity
 
-- **`deny[msg]`** - Mandatory (blocks deployment)
+Rules are identified by their name prefix, which determines the enforcement level and scope:
+
+**Resource-level rules** (evaluated per-resource via `Analyze`):
+- **`deny[msg]`** or **`violation[msg]`** - Mandatory (blocks deployment)
 - **`warn[msg]`** - Advisory (shows warning only)
+
+**Stack-level rules** (evaluated once for the entire stack via `AnalyzeStack`):
+- **`stack_deny[msg]`** or **`stack_violation[msg]`** - Mandatory (blocks deployment)
+- **`stack_warn[msg]`** - Advisory (shows warning only)
+
+Rules can include a suffix for disambiguation (e.g. `deny_public_buckets`, `stack_warn_orphan_sgs`).
 
 ```rego
 # Critical security issue - block deployment
@@ -414,6 +670,13 @@ deny[msg] {
 warn[msg] {
     not input.loggings
     msg := "Consider enabling access logs"
+}
+
+# Stack-level: enforce cross-resource constraints
+stack_deny_too_many_buckets[msg] {
+    buckets := [r | r := input.resources[_]; r.type == "aws:s3/bucket:Bucket"]
+    count(buckets) > 3
+    msg := sprintf("Stack has %d S3 buckets, maximum allowed is 3", [count(buckets)])
 }
 ```
 
@@ -495,14 +758,17 @@ Always create fixtures for:
 - ✅ Valid configuration (should pass)
 - ❌ Invalid configuration (should fail)
 
-### 5. Document Your Policies
+### 5. Document Your Policies with OPA Annotations
+
+Use `# METADATA` blocks so Pulumi can display rich policy information:
 
 ```rego
-# Policy: RDS-001
-# Description: All RDS instances must be encrypted at rest
-# Rationale: Required for SOC2 compliance
-# Severity: Critical
-deny[msg] {
+# METADATA
+# title: Require RDS Encryption
+# description: All RDS instances must be encrypted at rest (SOC2 requirement)
+# custom:
+#   message: Add storageEncrypted: true to the RDS instance
+deny_rds_encryption[msg] {
     input.type == "aws:rds/instance:Instance"
     not input.storageEncrypted
     msg := sprintf("RDS instance '%s' must have storage encryption enabled (SOC2)",
@@ -529,7 +795,7 @@ opa eval --data policies/ --format pretty "data"
 ### Issue: Violations not shown
 
 **Check:**
-1. Rule uses `deny[msg]` or `warn[msg]` format
+1. Rule uses a recognized prefix: `deny`, `violation`, `warn`, `stack_deny`, `stack_violation`, or `stack_warn`
 2. Input structure matches your resource type
 3. Use `pulumi preview --policy-pack ./policies --debug` for verbose output
 
@@ -686,13 +952,22 @@ containers = input.spec.template.spec.containers {
 
 ## Additional Resources
 
-### Pre-built Policy Packs
+### Example Policy Packs
 
-This repository includes ready-to-use policy packs in `tests/`:
+Ready-to-use examples in `examples/`:
+
+- **`examples/policy-kubernetes/`** - Kubernetes label and image policies with resource metadata access
+- **`examples/policy-aws/`** - AWS security policies with configuration, stack-level rules, and OPA annotations
+
+### Pre-built Test Policies
+
+This repository includes comprehensive test policies in `tests/`:
 
 - **`tests/aws/`** - AWS security policies (S3, EC2, RDS, IAM)
 - **`tests/azure/`** - Azure Native policies (Storage, Compute, Network, SQL)
 - **`tests/kubernetes/`** - Kubernetes security standards
+- **`tests/stack/`** - Stack-level cross-resource policies
+- **`tests/metadata/`** - Policies using resource metadata, options, and provider info
 
 Copy and customize for your needs!
 
