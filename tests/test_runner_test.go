@@ -173,7 +173,7 @@ func EvaluatePolicy(
 	)
 
 	// Evaluate
-	rs, err := query.Eval(context.TODO())
+	rs, err := query.Eval(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func EvaluateStackPolicy(
 			rego.SetRegoVersion(ast.RegoV0),
 		)
 
-		rs, err := query.Eval(context.TODO())
+		rs, err := query.Eval(context.Background())
 		if err != nil {
 			return nil, err
 		}
