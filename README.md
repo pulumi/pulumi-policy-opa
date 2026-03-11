@@ -25,7 +25,12 @@
 ```rego
 package aws
 
-deny[msg] {
+# METADATA
+# title: No Public S3 Buckets
+# description: S3 buckets must not use public-read ACLs.
+# custom:
+#   message: Set the ACL to 'private' or remove it entirely.
+deny_public_buckets[msg] {
     input.type == "aws:s3/bucket:Bucket"
     input.acl == "public-read"
     msg := sprintf("S3 bucket '%s' must not be publicly accessible", [input.__name])
@@ -39,7 +44,7 @@ pulumi preview --policy-pack ./policies
 
 # Output:
 # Policy Violations:
-#   [mandatory] aws.deny
+#   [mandatory] No Public S3 Buckets
 #   S3 bucket 'my-bucket' must not be publicly accessible
 ```
 
@@ -99,15 +104,23 @@ Create `s3-security.rego`:
 ```rego
 package aws
 
-# Deny public S3 buckets
-deny[msg] {
+# METADATA
+# title: No Public S3 Buckets
+# description: S3 buckets must not use public-read ACLs.
+# custom:
+#   message: Set the ACL to 'private' or remove it entirely.
+deny_public_buckets[msg] {
     input.type == "aws:s3/bucket:Bucket"
     input.acl == "public-read"
     msg := sprintf("S3 bucket '%s' must not have public-read ACL", [input.__name])
 }
 
-# Require encryption
-deny[msg] {
+# METADATA
+# title: Require S3 Encryption
+# description: All S3 buckets must have server-side encryption configured.
+# custom:
+#   message: Add a serverSideEncryptionConfiguration block to the bucket.
+deny_encryption[msg] {
     input.type == "aws:s3/bucket:Bucket"
     not input.serverSideEncryptionConfiguration
     msg := sprintf("S3 bucket '%s' must have encryption enabled", [input.__name])
@@ -150,8 +163,12 @@ pulumi up --policy-pack /path/to/my-policies
 ```rego
 package aws
 
-# No SSH from anywhere
-deny[msg] {
+# METADATA
+# title: No SSH from Anywhere
+# description: Security groups must not allow SSH (port 22) from 0.0.0.0/0.
+# custom:
+#   message: Restrict SSH access to specific IP ranges or use a bastion host.
+deny_open_ssh[msg] {
     input.type == "aws:ec2/securityGroup:SecurityGroup"
     some rule in input.ingress
     rule.protocol == "tcp"
@@ -161,8 +178,12 @@ deny[msg] {
     msg := sprintf("Security group '%s' allows SSH from 0.0.0.0/0", [input.__name])
 }
 
-# No RDP from anywhere
-deny[msg] {
+# METADATA
+# title: No RDP from Anywhere
+# description: Security groups must not allow RDP (port 3389) from 0.0.0.0/0.
+# custom:
+#   message: Restrict RDP access to specific IP ranges or use a VPN.
+deny_open_rdp[msg] {
     input.type == "aws:ec2/securityGroup:SecurityGroup"
     some rule in input.ingress
     rule.protocol == "tcp"
@@ -178,16 +199,24 @@ deny[msg] {
 ```rego
 package kubernetes
 
-# No privileged containers
-deny[msg] {
+# METADATA
+# title: No Privileged Containers
+# description: Deployments must not run containers in privileged mode.
+# custom:
+#   message: Set securityContext.privileged to false or remove it.
+deny_privileged[msg] {
     input.kind == "Deployment"
     some container in input.spec.template.spec.containers
     container.securityContext.privileged == true
     msg := sprintf("Deployment '%s' must not run privileged containers", [input.metadata.name])
 }
 
-# Require resource limits
-deny[msg] {
+# METADATA
+# title: Require CPU Limits
+# description: All containers must specify CPU resource limits.
+# custom:
+#   message: Add resources.limits.cpu to each container spec.
+deny_cpu_limits[msg] {
     input.kind == "Deployment"
     some container in input.spec.template.spec.containers
     not container.resources.limits.cpu
@@ -195,13 +224,17 @@ deny[msg] {
                    [input.metadata.name, container.name])
 }
 
-# Require standard labels
+# METADATA
+# title: Require Standard Labels
+# description: Deployments must include standard Kubernetes labels.
+# custom:
+#   message: Add app.kubernetes.io/name and app.kubernetes.io/version labels.
 required_labels = [
     "app.kubernetes.io/name",
     "app.kubernetes.io/version"
 ]
 
-deny[msg] {
+deny_required_labels[msg] {
     input.kind == "Deployment"
     some label in required_labels
     not input.metadata.labels[label]
@@ -215,23 +248,35 @@ deny[msg] {
 ```rego
 package azure
 
-# Require HTTPS-only traffic
-deny[msg] {
+# METADATA
+# title: Require HTTPS Traffic
+# description: Storage accounts must only accept HTTPS traffic.
+# custom:
+#   message: Set enableHttpsTrafficOnly to true.
+deny_https_only[msg] {
     input.type == "azure-native:storage:StorageAccount"
     input.enableHttpsTrafficOnly == false
     msg := sprintf("Storage account '%s' must enable HTTPS-only traffic", [input.__name])
 }
 
-# Require minimum TLS 1.2
-deny[msg] {
+# METADATA
+# title: Require TLS 1.2
+# description: Storage accounts must use TLS 1.2 or higher.
+# custom:
+#   message: Set minimumTlsVersion to "TLS1_2".
+deny_tls_version[msg] {
     input.type == "azure-native:storage:StorageAccount"
     input.minimumTlsVersion
     input.minimumTlsVersion != "TLS1_2"
     msg := sprintf("Storage account '%s' must use TLS 1.2 or higher", [input.__name])
 }
 
-# Disable public blob access
-deny[msg] {
+# METADATA
+# title: No Public Blob Access
+# description: Storage accounts must not allow public blob access.
+# custom:
+#   message: Set allowBlobPublicAccess to false.
+deny_public_blob_access[msg] {
     input.type == "azure-native:storage:StorageAccount"
     input.allowBlobPublicAccess == true
     msg := sprintf("Storage account '%s' must not allow public blob access", [input.__name])
@@ -243,15 +288,24 @@ deny[msg] {
 ```rego
 package aws
 
-# Stricter rules for production
-deny[msg] {
+# METADATA
+# title: Production RDS Multi-AZ
+# description: Production RDS instances must have Multi-AZ enabled for high availability.
+# custom:
+#   message: Set multiAz to true for production RDS instances.
+deny_prod_multi_az[msg] {
     input.type == "aws:rds/instance:Instance"
     contains(lower(input.__name), "prod")
     not input.multiAz
     msg := sprintf("Production RDS '%s' must have Multi-AZ enabled", [input.__name])
 }
 
-deny[msg] {
+# METADATA
+# title: Production RDS Backup Retention
+# description: Production RDS instances must retain backups for at least 7 days.
+# custom:
+#   message: Set backupRetentionPeriod to 7 or higher.
+deny_prod_backup_retention[msg] {
     input.type == "aws:rds/instance:Instance"
     contains(lower(input.__name), "prod")
     input.backupRetentionPeriod < 7
@@ -293,8 +347,12 @@ The following metadata fields are also available at the top level. If a resource
 Access deployment options via `input.options` (or `input.__options`):
 
 ```rego
-# Require protection on production resources
-deny[msg] {
+# METADATA
+# title: Production Resources Must Be Protected
+# description: Production resources must have the protect option enabled.
+# custom:
+#   message: Set the protect resource option to true.
+deny_prod_protect[msg] {
     contains(lower(input.__name), "prod")
     not input.options.protect
     msg := sprintf("Production resource '%s' must have protect enabled", [input.__name])
@@ -316,8 +374,12 @@ Available options fields:
 Access provider details via `input.provider` (or `input.__provider`):
 
 ```rego
-# Warn if using default provider
-warn[msg] {
+# METADATA
+# title: Avoid Default Provider
+# description: Resources should use an explicitly configured provider.
+# custom:
+#   message: Create a named provider and pass it via the provider resource option.
+warn_default_provider[msg] {
     input.provider
     contains(input.provider.name, "default")
     msg := sprintf("Resource '%s' is using the default provider", [input.__name])
@@ -331,8 +393,12 @@ Available provider fields: `type`, `name`, `urn`, `properties`
 Access properties without metadata collisions via `input.properties` (or `input.__properties`):
 
 ```rego
-# Access a property that might collide with a metadata field name
-deny[msg] {
+# METADATA
+# title: Block Dangerous Type Property
+# description: Flags resources whose 'type' property has a dangerous value.
+# custom:
+#   message: Change the 'type' property to a safe value.
+deny_dangerous_type[msg] {
     input.properties.type == "dangerous-value"
     msg := "The 'type' property has a dangerous value"
 }
@@ -351,14 +417,22 @@ Use the `stack_deny` or `stack_warn` prefix. The input contains a `resources` ar
 ```rego
 package mypack
 
-# Limit the number of S3 buckets per stack
+# METADATA
+# title: S3 Bucket Limit
+# description: Stacks must not contain more than 3 S3 buckets.
+# custom:
+#   message: Remove unused S3 buckets or split into multiple stacks.
 stack_deny_too_many_buckets[msg] {
     buckets := [r | r := input.resources[_]; r.type == "aws:s3/bucket:Bucket"]
     count(buckets) > 3
     msg := sprintf("Stack has %d S3 buckets, maximum allowed is 3", [count(buckets)])
 }
 
-# All S3 buckets must have encryption
+# METADATA
+# title: Require S3 Encryption (Stack)
+# description: All S3 buckets in the stack must have server-side encryption.
+# custom:
+#   message: Add a serverSideEncryptionConfiguration block to each bucket.
 stack_deny_unencrypted_buckets[msg] {
     r := input.resources[_]
     r.type == "aws:s3/bucket:Bucket"
@@ -366,7 +440,11 @@ stack_deny_unencrypted_buckets[msg] {
     msg := sprintf("S3 bucket '%s' must have encryption enabled", [r.__name])
 }
 
-# Warn about security groups not referenced by any resource
+# METADATA
+# title: Orphan Security Groups
+# description: Warns about security groups not referenced by any other resource.
+# custom:
+#   message: Remove the unused security group or attach it to a resource.
 stack_warn_orphan_security_groups[msg] {
     sg := input.resources[_]
     sg.type == "aws:ec2/securityGroup:SecurityGroup"
@@ -430,6 +508,11 @@ Inject custom values into policies via `data.config.<policy_name>.<key>`:
 ```rego
 package aws
 
+# METADATA
+# title: Limit EC2 Instance Size
+# description: EC2 instances must not exceed the configured maximum size.
+# custom:
+#   message: Use an instance type at or below the configured maxInstanceSize.
 deny_large_instances[msg] {
     input.type == "aws:ec2/instance:Instance"
     max_size := data.config.deny_large_instances.maxInstanceSize
@@ -660,19 +743,31 @@ Rules are identified by their name prefix, which determines the enforcement leve
 Rules can include a suffix for disambiguation (e.g. `deny_public_buckets`, `stack_warn_orphan_sgs`).
 
 ```rego
-# Critical security issue - block deployment
-deny[msg] {
+# METADATA
+# title: No Public Access
+# description: Resources must not allow public read access.
+# custom:
+#   message: Remove the public-read ACL.
+deny_public_access[msg] {
     input.acl == "public-read"
     msg := "Public access not allowed"
 }
 
-# Best practice - show warning
-warn[msg] {
+# METADATA
+# title: Enable Access Logging
+# description: Resources should have access logging enabled.
+# custom:
+#   message: Add a loggings configuration block.
+warn_logging[msg] {
     not input.loggings
     msg := "Consider enabling access logs"
 }
 
-# Stack-level: enforce cross-resource constraints
+# METADATA
+# title: S3 Bucket Limit
+# description: Stacks must not contain more than 3 S3 buckets.
+# custom:
+#   message: Remove unused buckets or split into multiple stacks.
 stack_deny_too_many_buckets[msg] {
     buckets := [r | r := input.resources[_]; r.type == "aws:s3/bucket:Bucket"]
     count(buckets) > 3
@@ -689,15 +784,25 @@ stack_deny_too_many_buckets[msg] {
 Begin with `warn[msg]` to understand impact, then upgrade to `deny[msg]`:
 
 ```rego
+# METADATA
+# title: Recommend t3 Instances
+# description: Suggests upgrading from t2.micro to t3.micro for better performance.
+# custom:
+#   message: Replace t2.micro with t3.micro.
 # Phase 1: Understand usage
-warn[msg] {
+warn_t2_micro[msg] {
     input.type == "aws:ec2/instance:Instance"
     input.instanceType == "t2.micro"
     msg := "Consider using t3.micro for better performance"
 }
 
+# METADATA
+# title: No t2.micro in Production
+# description: Production instances must not use t2.micro instance types.
+# custom:
+#   message: Use t3.micro or larger for production workloads.
 # Phase 2: After validation, enforce
-deny[msg] {
+deny_prod_t2_micro[msg] {
     input.type == "aws:ec2/instance:Instance"
     contains(lower(input.__name), "prod")
     input.instanceType == "t2.micro"
@@ -710,14 +815,19 @@ deny[msg] {
 Include resource name and specific remediation:
 
 ```rego
-# ❌ Bad - vague message
+# ❌ Bad - vague message, no metadata
 deny[msg] {
     not input.encrypted
     msg := "Must be encrypted"
 }
 
-# ✅ Good - clear and actionable
-deny[msg] {
+# ✅ Good - clear metadata, actionable message
+# METADATA
+# title: Require RDS Storage Encryption
+# description: All RDS instances must have storage encryption enabled.
+# custom:
+#   message: Add storageEncrypted: true to the RDS instance.
+deny_rds_encryption[msg] {
     input.type == "aws:rds/instance:Instance"
     not input.storageEncrypted
     msg := sprintf("RDS instance '%s' must enable storage encryption. Add: storageEncrypted: true",
@@ -745,8 +855,13 @@ is_workload {
     input.kind == "DaemonSet"
 }
 
+# METADATA
+# title: Workload Security Policy
+# description: Workloads must meet security requirements.
+# custom:
+#   message: Review the workload's security configuration.
 # Use helper in policies
-deny[msg] {
+deny_workload_security[msg] {
     is_workload
     # policy logic
 }
@@ -843,37 +958,57 @@ package aws
 import future.keywords.if
 import future.keywords.in
 
-# No public buckets
-deny[msg] {
+# METADATA
+# title: S3 Security Policies
+# scope: package
+
+# METADATA
+# title: No Public S3 Buckets
+# description: S3 buckets must not use public-read or public-read-write ACLs.
+# custom:
+#   message: Set the ACL to 'private' or remove it entirely.
+deny_public_buckets[msg] {
     input.type == "aws:s3/bucket:Bucket"
     input.acl in ["public-read", "public-read-write"]
     msg := sprintf("S3 bucket '%s' must not be publicly accessible", [input.__name])
 }
 
-# Require encryption
-deny[msg] {
+# METADATA
+# title: Require S3 Encryption
+# description: All S3 buckets must have server-side encryption configured.
+# custom:
+#   message: Add a serverSideEncryptionConfiguration block to the bucket.
+deny_encryption[msg] {
     input.type == "aws:s3/bucket:Bucket"
     not input.serverSideEncryptionConfiguration
     msg := sprintf("S3 bucket '%s' must have encryption enabled", [input.__name])
 }
 
-# Production buckets need versioning
-deny[msg] {
+# METADATA
+# title: Production Buckets Require Versioning
+# description: S3 buckets with "prod" in the name must have versioning enabled.
+# custom:
+#   message: Add versioning { enabled = true } to the bucket configuration.
+deny_prod_versioning[msg] {
     input.type == "aws:s3/bucket:Bucket"
     contains(lower(input.__name), "prod")
     not input.versioning
     msg := sprintf("Production S3 bucket '%s' must have versioning enabled", [input.__name])
 }
 
-deny[msg] {
+deny_prod_versioning_disabled[msg] {
     input.type == "aws:s3/bucket:Bucket"
     contains(lower(input.__name), "prod")
     input.versioning.enabled == false
     msg := sprintf("Production S3 bucket '%s' must have versioning enabled", [input.__name])
 }
 
-# Recommend logging
-warn[msg] {
+# METADATA
+# title: Recommend S3 Access Logging
+# description: S3 buckets should have access logging enabled for audit purposes.
+# custom:
+#   message: Add a loggings configuration block to the bucket.
+warn_logging[msg] {
     input.type == "aws:s3/bucket:Bucket"
     not input.loggings
     msg := sprintf("S3 bucket '%s' should enable access logging", [input.__name])
@@ -894,8 +1029,16 @@ package kubernetes
 import future.keywords.if
 import future.keywords.in
 
-# Pod Security: No privileged containers
-deny[msg] {
+# METADATA
+# title: Kubernetes Security Standards
+# scope: package
+
+# METADATA
+# title: No Privileged Containers
+# description: Workloads must not run containers in privileged mode.
+# custom:
+#   message: Set securityContext.privileged to false or remove it.
+deny_privileged[msg] {
     is_workload
     some container in containers
     container.securityContext.privileged == true
@@ -903,8 +1046,12 @@ deny[msg] {
                    [input.kind, input.metadata.name])
 }
 
-# Pod Security: Drop all capabilities
-deny[msg] {
+# METADATA
+# title: Drop All Capabilities
+# description: Workloads must drop all Linux capabilities and add back only what is needed.
+# custom:
+#   message: Add securityContext.capabilities.drop = ["ALL"] to each container.
+deny_drop_capabilities[msg] {
     is_workload
     some container in containers
     not container.securityContext.capabilities.drop
@@ -912,7 +1059,7 @@ deny[msg] {
                    [input.kind, input.metadata.name])
 }
 
-deny[msg] {
+deny_drop_all_capabilities[msg] {
     is_workload
     some container in containers
     container.securityContext.capabilities.drop
@@ -921,8 +1068,12 @@ deny[msg] {
                    [input.kind, input.metadata.name])
 }
 
-# Require resource limits
-deny[msg] {
+# METADATA
+# title: Require CPU Limits
+# description: All containers must specify CPU resource limits.
+# custom:
+#   message: Add resources.limits.cpu to each container spec.
+deny_cpu_limits[msg] {
     is_workload
     some container in containers
     not container.resources.limits.cpu
@@ -930,7 +1081,12 @@ deny[msg] {
                    [input.kind, input.metadata.name, container.name])
 }
 
-deny[msg] {
+# METADATA
+# title: Require Memory Limits
+# description: All containers must specify memory resource limits.
+# custom:
+#   message: Add resources.limits.memory to each container spec.
+deny_memory_limits[msg] {
     is_workload
     some container in containers
     not container.resources.limits.memory
