@@ -294,6 +294,199 @@ stack_violation_3bucket_check[msg] {
 	}
 }
 
+// TestLoadPolicies_RuleAnnotations verifies that OPA METADATA annotations on
+// rules populate DisplayName, Description, and Message on the loaded policy.
+func TestLoadPolicies_RuleAnnotations(t *testing.T) {
+	dir := writeRegoFile(t, "policy.rego", `
+package test
+
+# METADATA
+# title: No Public Buckets
+# description: S3 buckets must not use public-read ACLs.
+# custom:
+#   message: Bucket has a public ACL
+deny_no_public[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`)
+	pack, _, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	rule := findRule(pack, "deny_no_public")
+	if rule == nil {
+		t.Fatal("expected deny_no_public rule to be loaded")
+	}
+	if rule.DisplayName != "No Public Buckets" {
+		t.Errorf("expected DisplayName = %q, got %q", "No Public Buckets", rule.DisplayName)
+	}
+	if rule.Description != "S3 buckets must not use public-read ACLs." {
+		t.Errorf("expected Description = %q, got %q", "S3 buckets must not use public-read ACLs.", rule.Description)
+	}
+	if rule.Message != "Bucket has a public ACL" {
+		t.Errorf("expected Message = %q, got %q", "Bucket has a public ACL", rule.Message)
+	}
+}
+
+// TestLoadPolicies_RuleAnnotationsPartial verifies that partial annotations work—
+// e.g., only title is set, Description and Message remain empty.
+func TestLoadPolicies_RuleAnnotationsPartial(t *testing.T) {
+	dir := writeRegoFile(t, "policy.rego", `
+package test
+
+# METADATA
+# title: Encryption Check
+deny_encryption[msg] {
+    not input.encryption
+    msg := "encryption required"
+}
+`)
+	pack, _, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	rule := findRule(pack, "deny_encryption")
+	if rule == nil {
+		t.Fatal("expected deny_encryption rule to be loaded")
+	}
+	if rule.DisplayName != "Encryption Check" {
+		t.Errorf("expected DisplayName = %q, got %q", "Encryption Check", rule.DisplayName)
+	}
+	if rule.Description != "" {
+		t.Errorf("expected empty Description, got %q", rule.Description)
+	}
+	if rule.Message != "" {
+		t.Errorf("expected empty Message, got %q", rule.Message)
+	}
+}
+
+// TestLoadPolicies_NoAnnotations verifies that rules without annotations have
+// empty Description/Message and DisplayName falls back to the module name.
+func TestLoadPolicies_NoAnnotations(t *testing.T) {
+	dir := writeRegoFile(t, "policy.rego", `
+package test
+
+deny[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`)
+	pack, _, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	rule := findRule(pack, "deny")
+	if rule == nil {
+		t.Fatal("expected deny rule to be loaded")
+	}
+	if rule.DisplayName != "policy" {
+		t.Errorf("expected DisplayName = %q (module name), got %q", "policy", rule.DisplayName)
+	}
+	if rule.Description != "" {
+		t.Errorf("expected empty Description, got %q", rule.Description)
+	}
+	if rule.Message != "" {
+		t.Errorf("expected empty Message, got %q", rule.Message)
+	}
+}
+
+// TestLoadPolicies_PackageAnnotations verifies that a package-level METADATA
+// annotation populates the policyPack.DisplayName.
+func TestLoadPolicies_PackageAnnotations(t *testing.T) {
+	dir := writeRegoFile(t, "policy.rego", `
+# METADATA
+# scope: package
+# title: AWS Security Policies
+package test
+
+deny[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`)
+	pack, _, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	if pack.DisplayName != "AWS Security Policies" {
+		t.Errorf("expected pack DisplayName = %q, got %q", "AWS Security Policies", pack.DisplayName)
+	}
+}
+
+// TestLoadPolicies_NoPackageAnnotation verifies that without a package-level
+// annotation, policyPack.DisplayName is empty.
+func TestLoadPolicies_NoPackageAnnotation(t *testing.T) {
+	dir := writeRegoFile(t, "policy.rego", `
+package test
+
+deny[msg] {
+    msg := "fail"
+}
+`)
+	pack, _, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	if pack.DisplayName != "" {
+		t.Errorf("expected empty pack DisplayName, got %q", pack.DisplayName)
+	}
+}
+
+// TestGetAnalyzerInfo_IncludesAnnotations verifies that rule annotations flow
+// through to GetAnalyzerInfo policy metadata.
+func TestGetAnalyzerInfo_IncludesAnnotations(t *testing.T) {
+	dir := writeRegoFile(t, "policy.rego", `
+# METADATA
+# scope: package
+# title: My Policy Pack
+package test
+
+# METADATA
+# title: No Public Access
+# description: Denies resources with public ACLs.
+# custom:
+#   message: Resource has public access
+deny[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`)
+	pack, e, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+	info, err := a.GetAnalyzerInfo()
+	if err != nil {
+		t.Fatalf("GetAnalyzerInfo failed: %v", err)
+	}
+
+	if info.DisplayName != "My Policy Pack" {
+		t.Errorf("expected info.DisplayName = %q, got %q", "My Policy Pack", info.DisplayName)
+	}
+
+	if len(info.Policies) != 1 {
+		t.Fatalf("expected 1 policy, got %d", len(info.Policies))
+	}
+	pol := info.Policies[0]
+	if pol.DisplayName != "No Public Access" {
+		t.Errorf("expected policy DisplayName = %q, got %q", "No Public Access", pol.DisplayName)
+	}
+	if pol.Description != "Denies resources with public ACLs." {
+		t.Errorf("expected policy Description = %q, got %q", "Denies resources with public ACLs.", pol.Description)
+	}
+	if pol.Message != "Resource has public access" {
+		t.Errorf("expected policy Message = %q, got %q", "Resource has public access", pol.Message)
+	}
+}
+
 // TestLoadPolicies_MultiModuleDedupe verifies that when multiple .rego files
 // define the same rule name, only one policy entry is created (no duplicates)
 // and a warning is emitted to stderr.
