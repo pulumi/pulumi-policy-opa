@@ -4,7 +4,7 @@
 
 ## Why Use OPA with Pulumi?
 
-Define security, compliance, and best practice policies in Rego and enforce them **before** resources are deployed. Catch violations during `pulumi preview`, not after deployment. Works across AWS, Azure, GCP, and Kubernetes.
+Define security, compliance, and best practice policies in Rego and enforce them **before** resources are deployed. Catch violations during `pulumi preview`, not after deployment. Policies apply to any Pulumi provider -- AWS, Azure, GCP, Kubernetes, and the entire ecosystem.
 
 ## Quick Example
 
