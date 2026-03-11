@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/open-policy-agent/opa/v1/ast"
@@ -587,6 +588,107 @@ warn[msg] {
 				len(resp.Diagnostics), resp.Diagnostics)
 		}
 	})
+}
+
+func TestAnalyzer_Name(t *testing.T) {
+	t.Parallel()
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"check": `package mypolicies
+deny[msg] { msg := "fail" }
+`,
+	})
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+	if name := a.Name(); name != "mypolicies" {
+		t.Errorf("expected Name() = %q, got %q", "mypolicies", name)
+	}
+}
+
+func TestAnalyzer_Remediate(t *testing.T) {
+	t.Parallel()
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"check": `package test
+deny[msg] { msg := "fail" }
+`,
+	})
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+	resp, err := a.Remediate(plugin.AnalyzerResource{
+		URN:        resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket"),
+		Type:       tokens.Type("aws:s3/bucket:Bucket"),
+		Name:       "bucket",
+		Properties: resource.NewPropertyMapFromMap(map[string]any{"acl": "public-read"}),
+	})
+	if err != nil {
+		t.Fatalf("Remediate returned error: %v", err)
+	}
+	if len(resp.Remediations) != 0 {
+		t.Errorf("expected no remediations, got %d", len(resp.Remediations))
+	}
+}
+
+func TestAnalyzer_GetPluginInfo(t *testing.T) {
+	t.Parallel()
+
+	// Save and restore the global VersionString.
+	origVersion := VersionString
+	t.Cleanup(func() { VersionString = origVersion })
+
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"check": `package test
+deny[msg] { msg := "fail" }
+`,
+	})
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	VersionString = "1.2.3"
+	info, err := a.GetPluginInfo()
+	if err != nil {
+		t.Fatalf("GetPluginInfo returned error: %v", err)
+	}
+	if info.Version == nil {
+		t.Fatal("expected non-nil Version")
+	}
+	if info.Version.String() != "1.2.3" {
+		t.Errorf("expected version 1.2.3, got %s", info.Version.String())
+	}
+
+	VersionString = "not-a-version"
+	_, err = a.GetPluginInfo()
+	if err == nil {
+		t.Error("expected error for invalid version string")
+	}
+}
+
+func TestAnalyzer_CancelAndClose(t *testing.T) {
+	t.Parallel()
+	pack, e, err := compilePoliciesFromSource(map[string]string{
+		"check": `package test
+deny[msg] { msg := "fail" }
+`,
+	})
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	if err := a.Cancel(context.Background()); err != nil {
+		t.Errorf("Cancel returned error: %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Errorf("Close returned error: %v", err)
+	}
 }
 
 func TestAnalyzer_GetAnalyzerInfo_ReportsPolicyTypes(t *testing.T) {

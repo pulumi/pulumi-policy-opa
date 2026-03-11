@@ -485,6 +485,76 @@ deny[msg] {
 	}
 }
 
+// TestLoadPolicies_InvalidRego verifies that loadPolicyPack returns an error
+// when Rego files contain syntax errors.
+func TestLoadPolicies_InvalidRego(t *testing.T) {
+	t.Parallel()
+	dir := writeRegoFile(t, "policy.rego", `
+package test
+
+deny[msg] {
+    this is not valid rego !!!
+}
+`)
+	_, _, err := loadPolicyPack(dir)
+	if err == nil {
+		t.Fatal("expected loadPolicyPack to fail for invalid Rego syntax")
+	}
+	if !strings.Contains(err.Error(), "policy compilation failed") {
+		t.Errorf("expected compilation error, got: %v", err)
+	}
+}
+
+// TestLoadPolicies_PackageMismatch verifies that loadPolicyPack returns an error
+// when Rego files use different package names.
+func TestLoadPolicies_PackageMismatch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file1 := `
+package alpha
+
+deny[msg] {
+    msg := "alpha deny"
+}
+`
+	file2 := `
+package beta
+
+warn[msg] {
+    msg := "beta warn"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "alpha.rego"), []byte(file1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "beta.rego"), []byte(file2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := loadPolicyPack(dir)
+	if err == nil {
+		t.Fatal("expected loadPolicyPack to fail for package name mismatch")
+	}
+	if !strings.Contains(err.Error(), "unexpected package name") {
+		t.Errorf("expected package mismatch error, got: %v", err)
+	}
+}
+
+// TestLoadPolicies_EmptyDirectory verifies that loadPolicyPack handles a directory
+// with no .rego files gracefully (empty pack, no error).
+func TestLoadPolicies_EmptyDirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	pack, _, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("expected no error for empty directory, got: %v", err)
+	}
+	if len(pack.Policies) != 0 {
+		t.Errorf("expected 0 policies for empty directory, got %d", len(pack.Policies))
+	}
+}
+
 // TestLoadPolicies_MultiModuleDedupe verifies that when multiple .rego files
 // define the same rule name, only one policy entry is created (no duplicates)
 // and a warning is emitted to stderr.
