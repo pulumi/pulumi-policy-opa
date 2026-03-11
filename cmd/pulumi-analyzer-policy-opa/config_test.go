@@ -17,8 +17,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pulumi/pulumi/sdk/v3/go/common/apitype"
@@ -900,4 +902,220 @@ func TestConfiguredEnforcementLevel_Precedence(t *testing.T) {
 	if level := configuredEnforcementLevel(config, "deny"); level != apitype.Mandatory {
 		t.Errorf("expected mandatory from policy-specific, got %s", level)
 	}
+}
+
+// captureStderr runs fn while capturing os.Stderr output and returns the captured string.
+// Not safe for parallel use since it mutates the global os.Stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	_ = w.Close()
+	os.Stderr = origStderr
+
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+func TestWarnMissingConfig(t *testing.T) {
+	// These tests capture os.Stderr so they must not run in parallel with each other.
+
+	t.Run("WarnsWhenSchemaButNoConfig", func(t *testing.T) {
+		dir := t.TempDir()
+
+		module := `
+package test
+
+deny_size[msg] {
+    max := data.config.deny_size.maxSize
+    input.size > max
+    msg := "too big"
+}
+`
+		if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(module), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		schema := map[string]any{
+			"deny_size": map[string]any{
+				"properties": map[string]any{
+					"maxSize": map[string]any{"type": "number"},
+				},
+			},
+		}
+		data, _ := json.Marshal(schema)
+		if err := os.WriteFile(filepath.Join(dir, "config-schema.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+
+		a := NewAnalyzer(pack, e).(*analyzer)
+		// No Configure() call — policyConfig is nil.
+
+		stderr := captureStderr(t, func() {
+			_, _ = a.Analyze(plugin.AnalyzerResource{
+				Type:       "test:index:Resource",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(200)}),
+			})
+		})
+
+		if !strings.Contains(stderr, "deny_size") {
+			t.Errorf("expected warning mentioning deny_size, got: %q", stderr)
+		}
+		if !strings.Contains(stderr, "no configuration was provided") {
+			t.Errorf("expected warning about missing config, got: %q", stderr)
+		}
+	})
+
+	t.Run("NoWarningWhenConfigProvided", func(t *testing.T) {
+		dir := t.TempDir()
+
+		module := `
+package test
+
+deny_size[msg] {
+    max := data.config.deny_size.maxSize
+    input.size > max
+    msg := "too big"
+}
+`
+		if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(module), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		schema := map[string]any{
+			"deny_size": map[string]any{
+				"properties": map[string]any{
+					"maxSize": map[string]any{"type": "number"},
+				},
+			},
+		}
+		data, _ := json.Marshal(schema)
+		if err := os.WriteFile(filepath.Join(dir, "config-schema.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+
+		a := NewAnalyzer(pack, e).(*analyzer)
+		_ = a.Configure(map[string]plugin.AnalyzerPolicyConfig{
+			"deny_size": {
+				Properties: map[string]any{"maxSize": float64(100)},
+			},
+		})
+
+		stderr := captureStderr(t, func() {
+			_, _ = a.Analyze(plugin.AnalyzerResource{
+				Type:       "test:index:Resource",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(200)}),
+			})
+		})
+
+		if stderr != "" {
+			t.Errorf("expected no warnings, got: %q", stderr)
+		}
+	})
+
+	t.Run("WarnsOnlyOnce", func(t *testing.T) {
+		dir := t.TempDir()
+
+		module := `
+package test
+
+deny_size[msg] {
+    max := data.config.deny_size.maxSize
+    input.size > max
+    msg := "too big"
+}
+`
+		if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(module), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		schema := map[string]any{
+			"deny_size": map[string]any{
+				"properties": map[string]any{
+					"maxSize": map[string]any{"type": "number"},
+				},
+			},
+		}
+		data, _ := json.Marshal(schema)
+		if err := os.WriteFile(filepath.Join(dir, "config-schema.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+
+		a := NewAnalyzer(pack, e).(*analyzer)
+
+		// First call should warn.
+		stderr1 := captureStderr(t, func() {
+			_, _ = a.Analyze(plugin.AnalyzerResource{
+				Type:       "test:index:Resource",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(200)}),
+			})
+		})
+		if !strings.Contains(stderr1, "deny_size") {
+			t.Fatalf("expected warning on first call, got: %q", stderr1)
+		}
+
+		// Second call should not warn again.
+		stderr2 := captureStderr(t, func() {
+			_, _ = a.Analyze(plugin.AnalyzerResource{
+				Type:       "test:index:Resource",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(300)}),
+			})
+		})
+		if stderr2 != "" {
+			t.Errorf("expected no warning on second call, got: %q", stderr2)
+		}
+	})
+
+	t.Run("NoWarningWithoutSchema", func(t *testing.T) {
+		// Rule references data.config but has no config-schema.json — no warning expected.
+		module := `
+package test
+
+deny[msg] {
+    max := data.config.deny.maxBuckets
+    input.count > max
+    msg := "too many"
+}
+`
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+
+		a := NewAnalyzer(pack, e).(*analyzer)
+
+		stderr := captureStderr(t, func() {
+			_, _ = a.Analyze(plugin.AnalyzerResource{
+				Type:       "test:index:Resource",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{"count": float64(100)}),
+			})
+		})
+
+		if stderr != "" {
+			t.Errorf("expected no warning without schema, got: %q", stderr)
+		}
+	})
 }

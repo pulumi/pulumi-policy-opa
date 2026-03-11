@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/blang/semver"
 
@@ -32,9 +33,10 @@ var VersionString = "0.0.1+dev"
 
 // analyzer implements the Analyzer interface needed to plug into Pulumi as a policy analyzer.
 type analyzer struct {
-	pack         *policyPack
-	e            *evaler
-	policyConfig map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
+	pack          *policyPack
+	e             *evaler
+	policyConfig  map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
+	configChecked bool                                    // guards one-time missing-config warning
 }
 
 func NewAnalyzer(
@@ -52,6 +54,8 @@ func (a *analyzer) Name() tokens.QName {
 }
 
 func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, error) {
+	a.warnMissingConfig()
+
 	// Build the enriched input object containing both resource properties and metadata
 	// (type, urn, name, options, provider) so that OPA policies can access the full context.
 	// TODO: to attain rule compatibility with OPA rules written for, say, the Kubernetes Admission
@@ -67,6 +71,8 @@ func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, e
 }
 
 func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugin.AnalyzeResponse, error) {
+	a.warnMissingConfig()
+
 	// Short-circuit if no stack-level rules exist.
 	hasStackRules := false
 	for _, pol := range a.pack.Policies {
@@ -152,6 +158,29 @@ func (a *analyzer) Configure(policyConfig map[string]plugin.AnalyzerPolicyConfig
 	}
 	a.policyConfig = policyConfig
 	return nil
+}
+
+// warnMissingConfig logs a one-time warning for each policy that declares a config
+// schema but was not given any configuration properties. Without config, rules that
+// reference data.config will silently not fire.
+func (a *analyzer) warnMissingConfig() {
+	if a.configChecked {
+		return
+	}
+	a.configChecked = true
+
+	for _, pol := range a.pack.Policies {
+		if pol.ConfigSchema == nil {
+			continue
+		}
+		if a.policyConfig != nil {
+			if cfg, ok := a.policyConfig[pol.Name]; ok && len(cfg.Properties) > 0 {
+				continue
+			}
+		}
+		fmt.Fprintf(os.Stderr, "warning: policy %q declares a config schema but no configuration was provided; "+
+			"rules referencing data.config will not fire\n", pol.Name)
+	}
 }
 
 func (a *analyzer) Cancel(ctx context.Context) error {
