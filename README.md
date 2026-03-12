@@ -45,6 +45,7 @@ pulumi preview --policy-pack ./policies
 - [Quick Start](#quick-start)
 - [Policy Examples](#policy-examples)
 - [Resource Input Structure](#resource-input-structure)
+- [Kubernetes Admission Controller Compatibility](#kubernetes-admission-controller-compatibility)
 - [Stack-Level Policies](#stack-level-policies)
 - [Policy Configuration](#policy-configuration)
 - [Policy Metadata (OPA Annotations)](#policy-metadata-opa-annotations)
@@ -84,6 +85,8 @@ Create `PulumiPolicy.yaml`:
 ```yaml
 description: My Security Policies
 runtime: opa
+# Optional: set inputFormat to "kubernetes-admission" for Gatekeeper-compatible rules.
+# See "Kubernetes Admission Controller Compatibility" below.
 ```
 
 Create `s3-security.rego`:
@@ -378,6 +381,116 @@ deny_dangerous_type[msg] {
 
 ---
 
+## Kubernetes Admission Controller Compatibility
+
+If you have existing [OPA Gatekeeper](https://open-policy-agent.github.io/gatekeeper/) constraint templates, you can reuse them directly with Pulumi by setting `inputFormat: kubernetes-admission` in `PulumiPolicy.yaml`.
+
+### How It Works
+
+Standard Pulumi OPA policies see resource properties overlaid at the top level of `input`. Gatekeeper rules expect a different structure: `input.review.object.<properties>`. When `inputFormat: kubernetes-admission` is active, the analyzer automatically wraps Kubernetes resources in the Gatekeeper AdmissionReview structure before passing them to OPA:
+
+```
+input.review.object     — the full Kubernetes resource (properties + synthesized apiVersion/kind)
+input.review.kind       — { group, version, kind }
+input.review.name       — resource name (from metadata.name or Pulumi logical name)
+input.review.namespace  — namespace (from metadata.namespace, empty if not set)
+input.review.operation  — always "CREATE"
+input.parameters        — per-rule policy configuration properties
+input._pulumi           — escape hatch for Pulumi metadata (type, urn, name, options, provider)
+```
+
+Non-Kubernetes resources (e.g. `aws:s3/bucket:Bucket`) are silently skipped when this mode is active, since Gatekeeper rules are meaningless for non-K8s resources.
+
+### Setup
+
+Set `inputFormat` in your `PulumiPolicy.yaml`:
+
+```yaml
+description: Kubernetes Gatekeeper Policy Pack
+runtime: opa
+inputFormat: kubernetes-admission
+```
+
+Then drop in your existing Gatekeeper `.rego` files as-is:
+
+```rego
+package gatekeeper
+
+import rego.v1
+
+# This rule works identically in Gatekeeper and Pulumi
+violation contains {"msg": msg} if {
+    not input.review.object.metadata.labels["app"]
+    msg := sprintf("%s '%s' is missing required label: app",
+        [input.review.kind.kind, input.review.name])
+}
+```
+
+### Using `input.parameters`
+
+Gatekeeper Constraint parameters map to `input.parameters`. Configure them via the standard Pulumi policy configuration — each rule's `properties` are injected as `input.parameters` before evaluation:
+
+**Policy** (`replica-limits.rego`):
+```rego
+package gatekeeper
+
+import rego.v1
+
+violation contains {"msg": msg} if {
+    input.review.object.spec.replicas > input.parameters.maxReplicas
+    msg := sprintf("Deployment '%s' has %d replicas, max allowed is %d",
+        [input.review.name, input.review.object.spec.replicas, input.parameters.maxReplicas])
+}
+```
+
+**Configuration** (passed via Pulumi):
+```json
+{
+    "violation": {
+        "properties": {
+            "maxReplicas": 5
+        }
+    }
+}
+```
+
+This coexists with the standard `data.config.<rule_name>` mechanism — both work simultaneously.
+
+### Accessing Pulumi Metadata
+
+When you need Pulumi-specific information (URN, resource options, provider) from within a Gatekeeper-style rule, use the `input._pulumi` escape hatch:
+
+```rego
+violation contains {"msg": msg} if {
+    contains(lower(input._pulumi.name), "prod")
+    not input._pulumi.options.protect
+    msg := sprintf("Production resource '%s' must have protect enabled", [input._pulumi.name])
+}
+```
+
+### Mixing with Standard Rules
+
+A policy pack uses one input format. If you need both standard Pulumi OPA rules and Gatekeeper-style rules, create separate policy packs — one with `inputFormat: kubernetes-admission` for your Gatekeeper rules, and one without for your standard rules.
+
+### Stack-Level Gatekeeper Rules
+
+Stack-level rules (`stack_deny`, `stack_violation`, `stack_warn`) work with the admission format too. Each resource in `input.resources` is wrapped in the AdmissionReview structure, and non-K8s resources are filtered out:
+
+```rego
+package gatekeeper
+
+import rego.v1
+
+stack_violation contains {"msg": msg} if {
+    r := input.resources[_]
+    not r.review.object.metadata.labels["app"]
+    msg := sprintf("%s '%s' is missing required label: app",
+        [r.review.kind.kind, r.review.name])
+}
+```
+
+---
+
 ## Stack-Level Policies
 
 Stack-level policies evaluate the entire set of resources in a stack, enabling cross-resource checks like counting resources, verifying relationships, or enforcing fleet-wide standards.
@@ -660,6 +773,14 @@ my-policies/
     └── fixtures/            # Test data
 ```
 
+### `PulumiPolicy.yaml` Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `description` | No | Human-readable description of the policy pack |
+| `runtime` | Yes | Must be `opa` |
+| `inputFormat` | No | Set to `kubernetes-admission` for [Gatekeeper-compatible rules](#kubernetes-admission-controller-compatibility) |
+
 ### Package Naming
 
 All `.rego` files in a policy pack **must** use the same package name. Subpackages (e.g. `package aws.s3`) are not supported.
@@ -775,6 +896,13 @@ Always create fixtures for both valid (should pass) and invalid (should fail) co
 2. Verify the input structure matches your resource type
 3. Use `pulumi preview --policy-pack ./policies --debug` for verbose output
 
+### Gatekeeper rules not firing
+
+1. Verify `PulumiPolicy.yaml` includes `inputFormat: kubernetes-admission`
+2. Ensure the resource type starts with `kubernetes:` — non-K8s resources are skipped in admission mode
+3. Check that rules use `input.review.object.*` (not `input.*` directly)
+4. If using `input.parameters`, verify the rule name matches the config key and `properties` is non-empty
+
 ### Policy passes but shouldn't
 
 Add a temporary debug rule to inspect the input:
@@ -793,8 +921,9 @@ Ready-to-use policy packs in `examples/`:
 
 - **`examples/policy-aws/`** - AWS security policies with configuration, stack-level rules, and OPA annotations
 - **`examples/policy-kubernetes/`** - Kubernetes label and image policies with resource metadata access
+- **`examples/policy-kubernetes-gatekeeper/`** - Reuse OPA Gatekeeper constraint templates with `inputFormat: kubernetes-admission`
 
-Test policies in `tests/` covering AWS, Azure, Kubernetes, stack-level, and metadata scenarios. See the [Test Corpus Documentation](tests/README.md) for a complete catalog.
+Test policies in `tests/` covering AWS, Azure, Kubernetes, Kubernetes Admission Controller, stack-level, and metadata scenarios. See the [Test Corpus Documentation](tests/README.md) for a complete catalog.
 
 ### External Resources
 
