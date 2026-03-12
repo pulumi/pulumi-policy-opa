@@ -741,7 +741,7 @@ func TestBuildKubernetesAdmissionInput(t *testing.T) {
 		})
 
 		k8sInfo := parseK8sTypeToken(string(r.Type))
-		input := buildKubernetesAdmissionInput(r, k8sInfo, nil)
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
 
 		review, ok := input["review"].(map[string]any)
 		if !ok {
@@ -812,7 +812,7 @@ func TestBuildKubernetesAdmissionInput(t *testing.T) {
 		})
 
 		k8sInfo := parseK8sTypeToken(string(r.Type))
-		input := buildKubernetesAdmissionInput(r, k8sInfo, nil)
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
 		review := input["review"].(map[string]any)
 		obj := review["object"].(map[string]any)
 
@@ -834,7 +834,7 @@ func TestBuildKubernetesAdmissionInput(t *testing.T) {
 		})
 
 		k8sInfo := parseK8sTypeToken(string(r.Type))
-		input := buildKubernetesAdmissionInput(r, k8sInfo, nil)
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
 		review := input["review"].(map[string]any)
 
 		// Name should fall back to r.Name when metadata is absent.
@@ -855,7 +855,7 @@ func TestBuildKubernetesAdmissionInput(t *testing.T) {
 		})
 
 		k8sInfo := parseK8sTypeToken(string(r.Type))
-		input := buildKubernetesAdmissionInput(r, k8sInfo, nil)
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
 		review := input["review"].(map[string]any)
 		obj := review["object"].(map[string]any)
 

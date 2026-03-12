@@ -15,7 +15,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -52,7 +51,7 @@ func evalRule(t *testing.T, compiler *ast.Compiler, pkg, ruleName string, input 
 		rego.SetRegoVersion(ast.RegoV0),
 	)
 
-	rs, err := query.Eval(context.Background())
+	rs, err := query.Eval(t.Context())
 	if err != nil {
 		t.Fatalf("evaluation failed: %v", err)
 	}
@@ -334,7 +333,7 @@ deny contains val if {
 			},
 		}
 
-		results, err := e.evalPolicyPack(context.Background(), pack, map[string]any{}, resourceScope, nil)
+		results, err := e.evalPolicyPack(t.Context(), pack, map[string]any{}, resourceScope, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -615,7 +614,7 @@ stack_deny[msg] {
 
 		// Evaluate with stack scope — should only get stack violations.
 		input := map[string]any{"resources": []any{}}
-		results, err := e.evalPolicyPack(context.Background(), pack, input, stackScope, nil)
+		results, err := e.evalPolicyPack(t.Context(), pack, input, stackScope, nil)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}
@@ -649,7 +648,7 @@ stack_deny[msg] {
 
 		// Evaluate with resource scope — should only get resource violations.
 		input := map[string]any{"acl": "test"}
-		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
+		results, err := e.evalPolicyPack(t.Context(), pack, input, resourceScope, nil)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}
@@ -808,7 +807,7 @@ violation contains {"msg": msg} if {
 		},
 	}
 
-	results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
+	results, err := e.evalPolicyPack(t.Context(), pack, input, resourceScope, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -865,7 +864,7 @@ violation contains {"msg": msg} if {
 			},
 		}
 
-		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		results, err := e.evalPolicyPack(t.Context(), pack, input, resourceScope, config)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}
@@ -886,7 +885,7 @@ violation contains {"msg": msg} if {
 				},
 			},
 		}
-		results, err = e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		results, err = e.evalPolicyPack(t.Context(), pack, input, resourceScope, config)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}
@@ -927,7 +926,7 @@ violation contains {"msg": msg} if {
 		}
 
 		input := map[string]any{"replicas": float64(5)}
-		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		results, err := e.evalPolicyPack(t.Context(), pack, input, resourceScope, config)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}
@@ -974,7 +973,7 @@ violation contains {"msg": msg} if {
 				},
 			},
 		}
-		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		results, err := e.evalPolicyPack(t.Context(), pack, input, resourceScope, config)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}
@@ -1018,7 +1017,7 @@ violation contains {"msg": msg} if {
 				},
 			},
 		}
-		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		results, err := e.evalPolicyPack(t.Context(), pack, input, resourceScope, config)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}
@@ -1058,7 +1057,7 @@ violation contains {"msg": msg} if {
 				},
 			},
 		}
-		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
+		results, err := e.evalPolicyPack(t.Context(), pack, input, resourceScope, nil)
 		if err != nil {
 			t.Fatalf("evalPolicyPack failed: %v", err)
 		}

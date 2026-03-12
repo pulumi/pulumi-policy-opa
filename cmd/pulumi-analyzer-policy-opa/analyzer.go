@@ -64,7 +64,7 @@ func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, e
 			// Skip non-Kubernetes resources when admission format is active.
 			return plugin.AnalyzeResponse{}, nil
 		}
-		obj = buildKubernetesAdmissionInput(r, k8sInfo, a.policyConfig)
+		obj = buildKubernetesAdmissionInput(r, k8sInfo)
 	} else {
 		obj = buildOPAInput(r)
 	}
@@ -395,12 +395,10 @@ func parseK8sTypeToken(typeToken string) *k8sTypeInfo {
 //	input.review.name    — resource name from metadata
 //	input.review.namespace — namespace from metadata.namespace if present
 //	input.review.operation — always "CREATE" (Pulumi doesn't distinguish create/update in analyzer)
-//	input.parameters     — per-rule policy config (from policyConfig)
 //	input._pulumi        — escape hatch for Pulumi-specific metadata
 func buildKubernetesAdmissionInput(
 	r plugin.AnalyzerResource,
 	k8sInfo *k8sTypeInfo,
-	policyConfig map[string]plugin.AnalyzerPolicyConfig,
 ) map[string]any {
 	props := r.Properties.Mappable()
 
@@ -469,7 +467,7 @@ func buildKubernetesAdmissionStackInput(resources []plugin.AnalyzerStackResource
 		if k8sInfo == nil {
 			continue // skip non-K8s resources
 		}
-		obj := buildKubernetesAdmissionInput(sr.AnalyzerResource, k8sInfo, nil)
+		obj := buildKubernetesAdmissionInput(sr.AnalyzerResource, k8sInfo)
 		resourceList = append(resourceList, obj)
 	}
 
