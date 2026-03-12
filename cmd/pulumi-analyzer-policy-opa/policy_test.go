@@ -485,6 +485,136 @@ deny[msg] {
 	}
 }
 
+// TestLoadPolicyPack_ReadsPulumiPolicyYaml verifies that loadPolicyPack reads
+// PulumiPolicy.yaml and populates InputFormat and Description on the pack.
+func TestLoadPolicyPack_ReadsPulumiPolicyYaml(t *testing.T) {
+	t.Parallel()
+
+	t.Run("KubernetesAdmission", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		manifest := `description: K8s Gatekeeper Policies
+runtime: opa
+inputFormat: kubernetes-admission
+`
+		if err := os.WriteFile(filepath.Join(dir, "PulumiPolicy.yaml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(`
+package test
+violation[msg] { msg := "fail" }
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		pack, _, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		if pack.InputFormat != "kubernetes-admission" {
+			t.Errorf("expected InputFormat = kubernetes-admission, got %q", pack.InputFormat)
+		}
+		if pack.Description != "K8s Gatekeeper Policies" {
+			t.Errorf("expected Description from manifest, got %q", pack.Description)
+		}
+	})
+
+	t.Run("EmptyInputFormat", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		manifest := `description: Standard Policy Pack
+runtime: opa
+`
+		if err := os.WriteFile(filepath.Join(dir, "PulumiPolicy.yaml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(`
+package test
+deny[msg] { msg := "fail" }
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		pack, _, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		if pack.InputFormat != "" {
+			t.Errorf("expected empty InputFormat, got %q", pack.InputFormat)
+		}
+		if pack.Description != "Standard Policy Pack" {
+			t.Errorf("expected Description from manifest, got %q", pack.Description)
+		}
+	})
+
+	t.Run("NoManifest", func(t *testing.T) {
+		t.Parallel()
+		dir := writeRegoFile(t, "policy.rego", `
+package test
+deny[msg] { msg := "fail" }
+`)
+		pack, _, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		if pack.InputFormat != "" {
+			t.Errorf("expected empty InputFormat when no manifest, got %q", pack.InputFormat)
+		}
+		if pack.Description != "" {
+			t.Errorf("expected empty Description when no manifest, got %q", pack.Description)
+		}
+	})
+}
+
+// TestLoadPolicyPack_InvalidInputFormat verifies that loadPolicyPack returns an
+// error for unsupported inputFormat values.
+func TestLoadPolicyPack_InvalidInputFormat(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	manifest := `description: Bad Pack
+runtime: opa
+inputFormat: unsupported-format
+`
+	if err := os.WriteFile(filepath.Join(dir, "PulumiPolicy.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(`
+package test
+deny[msg] { msg := "fail" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := loadPolicyPack(dir)
+	if err == nil {
+		t.Fatal("expected error for unsupported inputFormat")
+	}
+	if !strings.Contains(err.Error(), "unsupported inputFormat") {
+		t.Errorf("expected 'unsupported inputFormat' in error, got: %v", err)
+	}
+}
+
+// TestLoadPolicyPack_MalformedManifest verifies that loadPolicyPack returns an
+// error when PulumiPolicy.yaml contains invalid YAML.
+func TestLoadPolicyPack_MalformedManifest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "PulumiPolicy.yaml"), []byte(":::invalid yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(`
+package test
+deny[msg] { msg := "fail" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := loadPolicyPack(dir)
+	if err == nil {
+		t.Fatal("expected error for malformed YAML")
+	}
+}
+
 // TestLoadPolicies_InvalidRego verifies that loadPolicyPack returns an error
 // when Rego files contain syntax errors.
 func TestLoadPolicies_InvalidRego(t *testing.T) {

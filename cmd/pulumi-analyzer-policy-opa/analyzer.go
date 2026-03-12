@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/blang/semver"
 
@@ -56,12 +57,18 @@ func (a *analyzer) Name() tokens.QName {
 func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, error) {
 	a.warnMissingConfig()
 
-	// Build the enriched input object containing both resource properties and metadata
-	// (type, urn, name, options, provider) so that OPA policies can access the full context.
-	// TODO: to attain rule compatibility with OPA rules written for, say, the Kubernetes Admission
-	//     Controller, there is a very different schema we would need to follow. It's possible we should
-	//     make the schema translation pluggable and customizable for certain policy packs and/or providers.
-	obj := buildOPAInput(r)
+	var obj map[string]any
+	if a.pack.InputFormat == InputFormatKubernetesAdmission {
+		k8sInfo := parseK8sTypeToken(string(r.Type))
+		if k8sInfo == nil {
+			// Skip non-Kubernetes resources when admission format is active.
+			return plugin.AnalyzeResponse{}, nil
+		}
+		obj = buildKubernetesAdmissionInput(r, k8sInfo, a.policyConfig)
+	} else {
+		obj = buildOPAInput(r)
+	}
+
 	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, resourceScope, a.policyConfig)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
@@ -86,7 +93,12 @@ func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugi
 	}
 
 	// Build the stack-level input containing all resources.
-	obj := buildStackOPAInput(resources)
+	var obj map[string]any
+	if a.pack.InputFormat == InputFormatKubernetesAdmission {
+		obj = buildKubernetesAdmissionStackInput(resources)
+	} else {
+		obj = buildStackOPAInput(resources)
+	}
 	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, stackScope, a.policyConfig)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
@@ -243,6 +255,37 @@ func enforcementLevelToAPI(level enforcementLevel) apitype.EnforcementLevel {
 	}
 }
 
+// buildOptionsMap constructs the options map for a resource.
+func buildOptionsMap(r plugin.AnalyzerResource) map[string]any {
+	return map[string]any{
+		"protect":                 r.Options.Protect,
+		"ignoreChanges":           r.Options.IgnoreChanges,
+		"deleteBeforeReplace":     r.Options.DeleteBeforeReplace,
+		"additionalSecretOutputs": propertyKeysToStrings(r.Options.AdditionalSecretOutputs),
+		"aliasURNs":               aliasURNsToStrings(r.Options.AliasURNs),
+		"aliases":                 aliasesToMaps(r.Options.Aliases),
+		"customTimeouts": map[string]any{
+			"create": r.Options.CustomTimeouts.Create,
+			"update": r.Options.CustomTimeouts.Update,
+			"delete": r.Options.CustomTimeouts.Delete,
+		},
+		"parent": string(r.Options.Parent),
+	}
+}
+
+// buildProviderMap constructs the provider info map for a resource.
+func buildProviderMap(r plugin.AnalyzerResource) map[string]any {
+	if r.Provider != nil {
+		return map[string]any{
+			"type":       string(r.Provider.Type),
+			"name":       r.Provider.Name,
+			"urn":        string(r.Provider.URN),
+			"properties": r.Provider.Properties.Mappable(),
+		}
+	}
+	return map[string]any{}
+}
+
 // buildOPAInput constructs the input object passed to OPA policy evaluation.
 // It starts with the resource metadata fields (type, urn, __name, options, provider,
 // properties) and then overlays the resource's own properties on top so that Rego
@@ -261,36 +304,10 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	obj["name"] = r.Name
 	obj["__name"] = r.Name
 
-	// Add resource options.
-	opts := map[string]any{
-		"protect":                 r.Options.Protect,
-		"ignoreChanges":           r.Options.IgnoreChanges,
-		"deleteBeforeReplace":     r.Options.DeleteBeforeReplace,
-		"additionalSecretOutputs": propertyKeysToStrings(r.Options.AdditionalSecretOutputs),
-		"aliasURNs":               aliasURNsToStrings(r.Options.AliasURNs),
-		"aliases":                 aliasesToMaps(r.Options.Aliases),
-		"customTimeouts": map[string]any{
-			"create": r.Options.CustomTimeouts.Create,
-			"update": r.Options.CustomTimeouts.Update,
-			"delete": r.Options.CustomTimeouts.Delete,
-		},
-		"parent": string(r.Options.Parent),
-	}
+	opts := buildOptionsMap(r)
 	obj["options"] = opts
 
-	// Add provider info. Use an empty map when provider is nil so that
-	// input.provider and input.__provider are always defined.
-	var providerInfo map[string]any
-	if r.Provider != nil {
-		providerInfo = map[string]any{
-			"type":       string(r.Provider.Type),
-			"name":       r.Provider.Name,
-			"urn":        string(r.Provider.URN),
-			"properties": r.Provider.Properties.Mappable(),
-		}
-	} else {
-		providerInfo = map[string]any{}
-	}
+	providerInfo := buildProviderMap(r)
 	obj["provider"] = providerInfo
 
 	// Expose the properties as a nested "properties" bag so that policies
@@ -316,6 +333,153 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	obj["__provider"] = providerInfo
 
 	return obj
+}
+
+// k8sTypeInfo holds the parsed components of a Kubernetes Pulumi type token.
+type k8sTypeInfo struct {
+	Group   string
+	Version string
+	Kind    string
+}
+
+// apiVersion returns the Kubernetes apiVersion string (e.g. "apps/v1" or "v1" for core).
+func (k *k8sTypeInfo) apiVersion() string {
+	if k.Group == "" {
+		return k.Version
+	}
+	return k.Group + "/" + k.Version
+}
+
+// parseK8sTypeToken extracts group, version, and kind from a Pulumi Kubernetes type token.
+// Tokens have the form "kubernetes:<group>/<version>:<kind>" where the group for core
+// resources is "core". Returns nil if the token is not a Kubernetes resource type.
+func parseK8sTypeToken(typeToken string) *k8sTypeInfo {
+	if !strings.HasPrefix(typeToken, "kubernetes:") {
+		return nil
+	}
+
+	// Strip the "kubernetes:" prefix.
+	rest := typeToken[len("kubernetes:"):]
+
+	// Split into "<group>/<version>" and "<kind>".
+	parts := strings.SplitN(rest, ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil
+	}
+
+	kind := parts[1]
+	groupVersion := parts[0]
+
+	// Split group/version.
+	gvParts := strings.SplitN(groupVersion, "/", 2)
+	if len(gvParts) != 2 || gvParts[0] == "" || gvParts[1] == "" {
+		return nil
+	}
+
+	group := gvParts[0]
+	version := gvParts[1]
+
+	// "core" is Pulumi's representation of the empty API group.
+	if group == "core" {
+		group = ""
+	}
+
+	return &k8sTypeInfo{Group: group, Version: version, Kind: kind}
+}
+
+// buildKubernetesAdmissionInput constructs an input object compatible with OPA Gatekeeper
+// AdmissionReview rules. The structure mirrors what Gatekeeper passes to constraint templates:
+//
+//	input.review.object  — the Kubernetes resource object (properties + synthesized apiVersion/kind)
+//	input.review.kind    — GVK info {group, version, kind}
+//	input.review.name    — resource name from metadata
+//	input.review.namespace — namespace from metadata.namespace if present
+//	input.review.operation — always "CREATE" (Pulumi doesn't distinguish create/update in analyzer)
+//	input.parameters     — per-rule policy config (from policyConfig)
+//	input._pulumi        — escape hatch for Pulumi-specific metadata
+func buildKubernetesAdmissionInput(
+	r plugin.AnalyzerResource,
+	k8sInfo *k8sTypeInfo,
+	policyConfig map[string]plugin.AnalyzerPolicyConfig,
+) map[string]any {
+	props := r.Properties.Mappable()
+
+	// Build the review object — start with the resource properties.
+	reviewObject := make(map[string]any, len(props)+2)
+	for k, v := range props {
+		reviewObject[k] = v
+	}
+
+	// Synthesize apiVersion and kind if not already present in properties.
+	if _, ok := reviewObject["apiVersion"]; !ok {
+		reviewObject["apiVersion"] = k8sInfo.apiVersion()
+	}
+	if _, ok := reviewObject["kind"]; !ok {
+		reviewObject["kind"] = k8sInfo.Kind
+	}
+
+	// Extract name and namespace from metadata if available.
+	var name, namespace string
+	if md, ok := reviewObject["metadata"].(map[string]any); ok {
+		if n, ok := md["name"].(string); ok {
+			name = n
+		}
+		if ns, ok := md["namespace"].(string); ok {
+			namespace = ns
+		}
+	}
+	if name == "" {
+		name = r.Name
+	}
+
+	review := map[string]any{
+		"object": reviewObject,
+		"kind": map[string]any{
+			"group":   k8sInfo.Group,
+			"version": k8sInfo.Version,
+			"kind":    k8sInfo.Kind,
+		},
+		"name":      name,
+		"namespace": namespace,
+		"operation": "CREATE",
+	}
+
+	// Pulumi-specific metadata escape hatch.
+	pulumiMeta := map[string]any{
+		"type":     string(r.Type),
+		"urn":      string(r.URN),
+		"name":     r.Name,
+		"options":  buildOptionsMap(r),
+		"provider": buildProviderMap(r),
+	}
+
+	return map[string]any{
+		"review":  review,
+		"_pulumi": pulumiMeta,
+	}
+}
+
+// buildKubernetesAdmissionStackInput constructs the stack-level input for
+// kubernetes-admission format. Non-K8s resources are filtered out.
+func buildKubernetesAdmissionStackInput(resources []plugin.AnalyzerStackResource) map[string]any {
+	var resourceList []map[string]any
+
+	for _, sr := range resources {
+		k8sInfo := parseK8sTypeToken(string(sr.Type))
+		if k8sInfo == nil {
+			continue // skip non-K8s resources
+		}
+		obj := buildKubernetesAdmissionInput(sr.AnalyzerResource, k8sInfo, nil)
+		resourceList = append(resourceList, obj)
+	}
+
+	if resourceList == nil {
+		resourceList = make([]map[string]any, 0)
+	}
+
+	return map[string]any{
+		"resources": resourceList,
+	}
 }
 
 // buildStackOPAInput constructs the input object passed to OPA stack policy evaluation.

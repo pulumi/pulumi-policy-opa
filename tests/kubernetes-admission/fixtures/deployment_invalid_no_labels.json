@@ -1,0 +1,26 @@
+{
+  "review": {
+    "object": {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "bad-deployment",
+        "labels": {}
+      },
+      "spec": {
+        "replicas": 2
+      }
+    },
+    "kind": {
+      "group": "apps",
+      "version": "v1",
+      "kind": "Deployment"
+    },
+    "name": "bad-deployment",
+    "namespace": "default",
+    "operation": "CREATE"
+  },
+  "parameters": {
+    "maxReplicas": 5
+  }
+}

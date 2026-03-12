@@ -25,7 +25,19 @@ import (
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/pkg/errors"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
+	"gopkg.in/yaml.v3"
 )
+
+// InputFormatKubernetesAdmission is the inputFormat value that enables
+// Gatekeeper-compatible AdmissionReview wrapping for Kubernetes resources.
+const InputFormatKubernetesAdmission = "kubernetes-admission"
+
+// policyPackManifest represents the contents of PulumiPolicy.yaml.
+type policyPackManifest struct {
+	Description string `yaml:"description"`
+	Runtime     string `yaml:"runtime"`
+	InputFormat string `yaml:"inputFormat"`
+}
 
 // Rego modules contain rules, some of which have prefixes. Only those with the appropriate
 // prefix will be considered rules for evaluation -- all others are used as library routines.
@@ -40,9 +52,21 @@ var (
 
 // loadPolicyPack loads the metadata about a pack and its policies from a directory containing OPA *.rego files.
 func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
-	// First open the manifest file to learn more about the pack.
-	// TODO: we need to do this in order to provide metadata about the package itself, like its name,
-	// description, and so on. The idea here is to just put a PulumiPolicy.yaml inside the rules/ directory.
+	// Read the optional PulumiPolicy.yaml manifest for pack metadata.
+	var manifest policyPackManifest
+	manifestPath := filepath.Join(dir, "PulumiPolicy.yaml")
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		if err := yaml.Unmarshal(data, &manifest); err != nil {
+			return nil, nil, errors.Wrapf(err, "parsing %s", manifestPath)
+		}
+		if manifest.InputFormat != "" && manifest.InputFormat != InputFormatKubernetesAdmission {
+			return nil, nil, errors.Errorf(
+				"unsupported inputFormat %q in %s (valid values: %q)",
+				manifest.InputFormat, manifestPath, InputFormatKubernetesAdmission)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, nil, errors.Wrapf(err, "reading %s", manifestPath)
+	}
 
 	// Next gather up all the OPA rego files to run and prepare to compile them.
 	modules := make(map[string]string)
@@ -190,6 +214,8 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	pack := &policyPack{
 		Name:        packName,
 		DisplayName: packDisplayName,
+		Description: manifest.Description,
+		InputFormat: manifest.InputFormat,
 		Policies:    policies,
 	}
 
@@ -203,6 +229,8 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 type policyPack struct {
 	Name        string        `json:"name"`
 	DisplayName string        `json:"displayName"`
+	Description string        `json:"description"`
+	InputFormat string        `json:"inputFormat,omitempty"`
 	Policies    []*policyRule `json:"policies"`
 }
 

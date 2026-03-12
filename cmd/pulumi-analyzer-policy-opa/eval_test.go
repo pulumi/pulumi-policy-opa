@@ -21,6 +21,7 @@ import (
 
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
 )
 
 // compileModule compiles a single Rego module and returns the compiler.
@@ -660,4 +661,134 @@ stack_deny[msg] {
 			t.Errorf("expected 'resource violation', got %q", results[0].msg)
 		}
 	})
+}
+
+func TestEval_GatekeeperViolationMap(t *testing.T) {
+	t.Parallel()
+
+	t.Run("MapWithMsg", func(t *testing.T) {
+		t.Parallel()
+		// Gatekeeper-style violation rule returning a set of maps with "msg" key.
+		module := `
+package test
+
+import rego.v1
+
+violation contains {"msg": msg} if {
+    not input.review.object.metadata.labels["app"]
+    msg := "missing required label: app"
+}
+`
+		compiler := compileModule(t, "test", module)
+		e := &evaler{c: compiler}
+
+		pack := &policyPack{
+			Name: "test",
+			Policies: []*policyRule{
+				{Name: "violation", Level: mandatoryRule, Scope: resourceScope},
+			},
+		}
+
+		input := map[string]any{
+			"review": map[string]any{
+				"object": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{},
+					},
+				},
+			},
+		}
+
+		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(results))
+		}
+		if results[0].msg != "missing required label: app" {
+			t.Errorf("expected violation message, got %q", results[0].msg)
+		}
+	})
+
+	t.Run("MapWithoutMsg", func(t *testing.T) {
+		t.Parallel()
+		// A map without "msg" should fall back to fmt.Sprintf.
+		msg := extractViolationMessage(map[string]any{"details": "something"})
+		if msg == "" {
+			t.Error("expected non-empty message for map without msg key")
+		}
+	})
+
+	t.Run("StringValue", func(t *testing.T) {
+		t.Parallel()
+		msg := extractViolationMessage("plain string")
+		if msg != "plain string" {
+			t.Errorf("expected 'plain string', got %q", msg)
+		}
+	})
+}
+
+func TestEval_InputParameters(t *testing.T) {
+	t.Parallel()
+
+	// Gatekeeper-style rule accessing input.parameters.
+	module := `
+package test
+
+import rego.v1
+
+violation contains {"msg": msg} if {
+    max := input.parameters.maxReplicas
+    input.review.object.spec.replicas > max
+    msg := sprintf("replicas %d exceeds max %d", [input.review.object.spec.replicas, max])
+}
+`
+	dir := writeRegoFile(t, "policy.rego", module)
+	pack, e, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+	pack.InputFormat = InputFormatKubernetesAdmission
+
+	config := map[string]plugin.AnalyzerPolicyConfig{
+		"violation": {
+			Properties: map[string]any{
+				"maxReplicas": float64(3),
+			},
+		},
+	}
+
+	// Input with replicas=5 should violate.
+	input := map[string]any{
+		"review": map[string]any{
+			"object": map[string]any{
+				"spec": map[string]any{
+					"replicas": float64(5),
+				},
+			},
+		},
+	}
+
+	results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+	if err != nil {
+		t.Fatalf("evalPolicyPack failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 violation, got %d", len(results))
+	}
+	if results[0].msg != "replicas 5 exceeds max 3" {
+		t.Errorf("unexpected message: %s", results[0].msg)
+	}
+
+	// Input with replicas=2 should pass.
+	input["review"].(map[string]any)["object"].(map[string]any)["spec"].(map[string]any)["replicas"] = float64(2)
+	results, err = e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+	if err != nil {
+		t.Fatalf("evalPolicyPack failed: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 violations, got %d", len(results))
+	}
 }

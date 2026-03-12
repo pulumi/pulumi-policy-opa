@@ -55,11 +55,22 @@ func (e *evaler) evalPolicyPack(
 			continue
 		}
 
+		// When kubernetes-admission format is active, inject input.parameters
+		// from the per-rule policy config so Gatekeeper rules can access them.
+		evalInput := input
+		if pack.InputFormat == InputFormatKubernetesAdmission {
+			if policyConfig != nil {
+				if cfg, ok := policyConfig[rule.Name]; ok && len(cfg.Properties) > 0 {
+					evalInput = cloneInputWithParameters(input, cfg.Properties)
+				}
+			}
+		}
+
 		// Build a rego object that can be evaluated.
 		opts := []func(*rego.Rego){
 			rego.Query(fmt.Sprintf("data.%s.%s", pack.Name, rule.Name)),
 			rego.Compiler(e.c),
-			rego.Input(input),
+			rego.Input(evalInput),
 			rego.SetRegoVersion(ast.RegoV0),
 		}
 		if store != nil {
@@ -76,10 +87,7 @@ func (e *evaler) evalPolicyPack(
 			for _, expr := range result.Expressions {
 				if ae, ok := expr.Value.([]any); ok && len(ae) > 0 {
 					for _, v := range ae {
-						msg, ok := v.(string)
-						if !ok {
-							msg = fmt.Sprintf("%v", v)
-						}
+						msg := extractViolationMessage(v)
 						results = append(results, evalPolicyResult{
 							pack:  pack.Name,
 							rule:  rule.Name,
@@ -125,6 +133,39 @@ type evalPolicyResult struct {
 	rule  string
 	msg   string
 	level enforcementLevel
+}
+
+// extractViolationMessage extracts a human-readable message from an OPA rule result value.
+// Gatekeeper rules return violation[{"msg": msg, ...}] (map values), while standard
+// rules return deny["message string"]. This handles both formats.
+func extractViolationMessage(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case map[string]any:
+		if msg, ok := val["msg"].(string); ok {
+			return msg
+		}
+		return fmt.Sprintf("%v", val)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// cloneInputWithParameters creates a shallow copy of the input map and injects
+// a "parameters" key containing the given properties. This lets Gatekeeper-style
+// rules access per-rule config via input.parameters.
+func cloneInputWithParameters(input any, parameters map[string]any) any {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return input
+	}
+	clone := make(map[string]any, len(m)+1)
+	for k, v := range m {
+		clone[k] = v
+	}
+	clone["parameters"] = parameters
+	return clone
 }
 
 // configuredEnforcementLevel returns the enforcement level override for a policy
