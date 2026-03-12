@@ -1,4 +1,4 @@
-// Copyright 2025, Pulumi Corporation.
+// Copyright 2026, Pulumi Corporation.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -606,6 +606,308 @@ func TestBuildStackInput(t *testing.T) {
 		}
 		if _, exists := resList[0]["propertyDependencies"]; exists {
 			t.Error("expected propertyDependencies to be absent when nil")
+		}
+	})
+}
+
+func TestParseK8sTypeToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		token   string
+		want    *k8sTypeInfo
+	}{
+		{
+			name:  "apps/v1 Deployment",
+			token: "kubernetes:apps/v1:Deployment",
+			want:  &k8sTypeInfo{Group: "apps", Version: "v1", Kind: "Deployment"},
+		},
+		{
+			name:  "core/v1 Pod (core maps to empty group)",
+			token: "kubernetes:core/v1:Pod",
+			want:  &k8sTypeInfo{Group: "", Version: "v1", Kind: "Pod"},
+		},
+		{
+			name:  "networking.k8s.io/v1 NetworkPolicy",
+			token: "kubernetes:networking.k8s.io/v1:NetworkPolicy",
+			want:  &k8sTypeInfo{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy"},
+		},
+		{
+			name:  "batch/v1 Job",
+			token: "kubernetes:batch/v1:Job",
+			want:  &k8sTypeInfo{Group: "batch", Version: "v1", Kind: "Job"},
+		},
+		{
+			name:  "non-K8s AWS type",
+			token: "aws:s3/bucket:Bucket",
+			want:  nil,
+		},
+		{
+			name:  "non-K8s Azure type",
+			token: "azure:storage/account:Account",
+			want:  nil,
+		},
+		{
+			name:  "empty string",
+			token: "",
+			want:  nil,
+		},
+		{
+			name:  "malformed - no kind separator",
+			token: "kubernetes:apps/v1",
+			want:  nil,
+		},
+		{
+			name:  "malformed - no version",
+			token: "kubernetes:apps:Deployment",
+			want:  nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseK8sTypeToken(tc.token)
+			if tc.want == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected %+v, got nil", tc.want)
+			}
+			if got.Group != tc.want.Group {
+				t.Errorf("Group: expected %q, got %q", tc.want.Group, got.Group)
+			}
+			if got.Version != tc.want.Version {
+				t.Errorf("Version: expected %q, got %q", tc.want.Version, got.Version)
+			}
+			if got.Kind != tc.want.Kind {
+				t.Errorf("Kind: expected %q, got %q", tc.want.Kind, got.Kind)
+			}
+		})
+	}
+}
+
+func TestK8sTypeInfo_ApiVersion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WithGroup", func(t *testing.T) {
+		t.Parallel()
+		info := &k8sTypeInfo{Group: "apps", Version: "v1", Kind: "Deployment"}
+		if got := info.apiVersion(); got != "apps/v1" {
+			t.Errorf("expected apps/v1, got %s", got)
+		}
+	})
+
+	t.Run("CoreGroup", func(t *testing.T) {
+		t.Parallel()
+		info := &k8sTypeInfo{Group: "", Version: "v1", Kind: "Pod"}
+		if got := info.apiVersion(); got != "v1" {
+			t.Errorf("expected v1, got %s", got)
+		}
+	})
+}
+
+// makeK8sResource creates an AnalyzerResource for a Kubernetes type.
+func makeK8sResource(typeToken, name string, props map[string]any) plugin.AnalyzerResource {
+	return plugin.AnalyzerResource{
+		URN:        resource.URN("urn:pulumi:test-stack::test-project::" + typeToken + "::" + name),
+		Type:       tokens.Type(typeToken),
+		Name:       name,
+		Properties: resource.NewPropertyMapFromMap(props),
+		Options:    plugin.AnalyzerResourceOptions{},
+	}
+}
+
+func TestBuildKubernetesAdmissionInput(t *testing.T) {
+	t.Parallel()
+
+	t.Run("BasicDeployment", func(t *testing.T) {
+		t.Parallel()
+		r := makeK8sResource("kubernetes:apps/v1:Deployment", "my-deploy", map[string]any{
+			"metadata": map[string]any{
+				"name":      "my-deploy",
+				"namespace": "default",
+				"labels": map[string]any{
+					"app": "web",
+				},
+			},
+			"spec": map[string]any{
+				"replicas": float64(3),
+			},
+		})
+
+		k8sInfo := parseK8sTypeToken(string(r.Type))
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
+
+		review, ok := input["review"].(map[string]any)
+		if !ok {
+			t.Fatal("expected review to be a map")
+		}
+
+		// Check review.object has properties + synthesized fields.
+		obj, ok := review["object"].(map[string]any)
+		if !ok {
+			t.Fatal("expected review.object to be a map")
+		}
+		if obj["apiVersion"] != "apps/v1" {
+			t.Errorf("expected apiVersion = apps/v1, got %v", obj["apiVersion"])
+		}
+		if obj["kind"] != "Deployment" {
+			t.Errorf("expected kind = Deployment, got %v", obj["kind"])
+		}
+		if obj["spec"] == nil {
+			t.Error("expected spec to be present")
+		}
+
+		// Check review.kind GVK.
+		kind, ok := review["kind"].(map[string]any)
+		if !ok {
+			t.Fatal("expected review.kind to be a map")
+		}
+		if kind["group"] != "apps" {
+			t.Errorf("expected group = apps, got %v", kind["group"])
+		}
+		if kind["version"] != "v1" {
+			t.Errorf("expected version = v1, got %v", kind["version"])
+		}
+		if kind["kind"] != "Deployment" {
+			t.Errorf("expected kind = Deployment, got %v", kind["kind"])
+		}
+
+		// Check review.name and review.namespace.
+		if review["name"] != "my-deploy" {
+			t.Errorf("expected name = my-deploy, got %v", review["name"])
+		}
+		if review["namespace"] != "default" {
+			t.Errorf("expected namespace = default, got %v", review["namespace"])
+		}
+		if review["operation"] != "CREATE" {
+			t.Errorf("expected operation = CREATE, got %v", review["operation"])
+		}
+
+		// Check _pulumi metadata.
+		pulumi, ok := input["_pulumi"].(map[string]any)
+		if !ok {
+			t.Fatal("expected _pulumi to be a map")
+		}
+		if pulumi["type"] != "kubernetes:apps/v1:Deployment" {
+			t.Errorf("expected _pulumi.type, got %v", pulumi["type"])
+		}
+		if pulumi["name"] != "my-deploy" {
+			t.Errorf("expected _pulumi.name = my-deploy, got %v", pulumi["name"])
+		}
+	})
+
+	t.Run("CoreGroupPod", func(t *testing.T) {
+		t.Parallel()
+		r := makeK8sResource("kubernetes:core/v1:Pod", "my-pod", map[string]any{
+			"metadata": map[string]any{
+				"name": "my-pod",
+			},
+			"spec": map[string]any{},
+		})
+
+		k8sInfo := parseK8sTypeToken(string(r.Type))
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
+		review := input["review"].(map[string]any)
+		obj := review["object"].(map[string]any)
+
+		// Core group should produce apiVersion "v1" (no group prefix).
+		if obj["apiVersion"] != "v1" {
+			t.Errorf("expected apiVersion = v1, got %v", obj["apiVersion"])
+		}
+
+		kind := review["kind"].(map[string]any)
+		if kind["group"] != "" {
+			t.Errorf("expected empty group for core, got %v", kind["group"])
+		}
+	})
+
+	t.Run("NoMetadata", func(t *testing.T) {
+		t.Parallel()
+		r := makeK8sResource("kubernetes:core/v1:ConfigMap", "my-cm", map[string]any{
+			"data": map[string]any{"key": "value"},
+		})
+
+		k8sInfo := parseK8sTypeToken(string(r.Type))
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
+		review := input["review"].(map[string]any)
+
+		// Name should fall back to r.Name when metadata is absent.
+		if review["name"] != "my-cm" {
+			t.Errorf("expected name = my-cm, got %v", review["name"])
+		}
+		if review["namespace"] != "" {
+			t.Errorf("expected empty namespace, got %v", review["namespace"])
+		}
+	})
+
+	t.Run("ExistingApiVersionPreserved", func(t *testing.T) {
+		t.Parallel()
+		r := makeK8sResource("kubernetes:apps/v1:Deployment", "my-deploy", map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]any{"name": "my-deploy"},
+		})
+
+		k8sInfo := parseK8sTypeToken(string(r.Type))
+		input := buildKubernetesAdmissionInput(r, k8sInfo)
+		review := input["review"].(map[string]any)
+		obj := review["object"].(map[string]any)
+
+		// Should preserve existing values, not overwrite.
+		if obj["apiVersion"] != "apps/v1" {
+			t.Errorf("expected apiVersion preserved, got %v", obj["apiVersion"])
+		}
+		if obj["kind"] != "Deployment" {
+			t.Errorf("expected kind preserved, got %v", obj["kind"])
+		}
+	})
+}
+
+func TestBuildKubernetesAdmissionStackInput(t *testing.T) {
+	t.Parallel()
+
+	t.Run("FiltersNonK8s", func(t *testing.T) {
+		t.Parallel()
+		resources := []plugin.AnalyzerStackResource{
+			{AnalyzerResource: makeK8sResource("kubernetes:apps/v1:Deployment", "deploy", map[string]any{
+				"metadata": map[string]any{"name": "deploy"},
+			})},
+			{AnalyzerResource: makeK8sResource("aws:s3/bucket:Bucket", "bucket", map[string]any{
+				"acl": "private",
+			})},
+		}
+
+		input := buildKubernetesAdmissionStackInput(resources)
+		resList, ok := input["resources"].([]map[string]any)
+		if !ok {
+			t.Fatal("expected resources to be []map[string]any")
+		}
+		if len(resList) != 1 {
+			t.Fatalf("expected 1 resource (non-K8s filtered), got %d", len(resList))
+		}
+
+		// The remaining resource should have admission format.
+		if _, ok := resList[0]["review"]; !ok {
+			t.Error("expected admission-format resource with review key")
+		}
+	})
+
+	t.Run("EmptyWhenAllNonK8s", func(t *testing.T) {
+		t.Parallel()
+		resources := []plugin.AnalyzerStackResource{
+			{AnalyzerResource: makeK8sResource("aws:s3/bucket:Bucket", "bucket", map[string]any{})},
+		}
+
+		input := buildKubernetesAdmissionStackInput(resources)
+		resList := input["resources"].([]map[string]any)
+		if len(resList) != 0 {
+			t.Errorf("expected 0 resources, got %d", len(resList))
 		}
 	})
 }

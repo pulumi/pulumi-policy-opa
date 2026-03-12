@@ -1,0 +1,28 @@
+{
+  "review": {
+    "object": {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "nginx-deployment",
+        "labels": {
+          "app": "nginx"
+        }
+      },
+      "spec": {
+        "replicas": 2
+      }
+    },
+    "kind": {
+      "group": "apps",
+      "version": "v1",
+      "kind": "Deployment"
+    },
+    "name": "nginx-deployment",
+    "namespace": "default",
+    "operation": "CREATE"
+  },
+  "parameters": {
+    "maxReplicas": 5
+  }
+}

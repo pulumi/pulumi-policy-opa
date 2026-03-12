@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.1.0
+
+### New Features
+
+- **Kubernetes Admission Controller compatibility**: New `inputFormat: kubernetes-admission`
+  setting in `PulumiPolicy.yaml` enables drop-in reuse of existing OPA Gatekeeper constraint
+  template rules. Pulumi automatically wraps Kubernetes resources in the Gatekeeper
+  AdmissionReview structure (`input.review.object`, `input.review.kind`, etc.) so `.rego`
+  files work without modification. Non-Kubernetes resources are automatically skipped. (#35)
+
+- **Gatekeeper `input.parameters` support**: Per-policy configuration properties are injected
+  as `input.parameters` when using the `kubernetes-admission` input format, matching the
+  Gatekeeper Constraint parameter convention. (#35)
+
+- **Gatekeeper violation map format**: Rules returning `violation[{"msg": msg}]` (map values)
+  are now handled alongside the existing string-based `deny[msg]` format. (#35)
+
+### Improvements
+
+- `PulumiPolicy.yaml` manifest is now parsed at load time, populating the policy pack
+  description and validating the `inputFormat` field.
+- Added new example: `examples/policy-kubernetes-gatekeeper/` demonstrating Gatekeeper-style
+  policy reuse.
+
 ## v1.0.0
 
 ### Summary
