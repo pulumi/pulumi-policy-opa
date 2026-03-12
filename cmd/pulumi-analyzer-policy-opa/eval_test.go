@@ -663,13 +663,122 @@ stack_deny[msg] {
 	})
 }
 
-func TestEval_GatekeeperViolationMap(t *testing.T) {
+func TestExtractViolationMessage(t *testing.T) {
 	t.Parallel()
+
+	t.Run("String", func(t *testing.T) {
+		t.Parallel()
+		msg := extractViolationMessage("plain string")
+		if msg != "plain string" {
+			t.Errorf("expected 'plain string', got %q", msg)
+		}
+	})
 
 	t.Run("MapWithMsg", func(t *testing.T) {
 		t.Parallel()
-		// Gatekeeper-style violation rule returning a set of maps with "msg" key.
-		module := `
+		msg := extractViolationMessage(map[string]any{"msg": "violation found", "details": map[string]any{}})
+		if msg != "violation found" {
+			t.Errorf("expected 'violation found', got %q", msg)
+		}
+	})
+
+	t.Run("MapWithoutMsg", func(t *testing.T) {
+		t.Parallel()
+		msg := extractViolationMessage(map[string]any{"details": "something"})
+		if msg == "" {
+			t.Error("expected non-empty message for map without msg key")
+		}
+	})
+
+	t.Run("MapWithNonStringMsg", func(t *testing.T) {
+		t.Parallel()
+		// msg key exists but is not a string — should fall back to fmt.Sprintf.
+		msg := extractViolationMessage(map[string]any{"msg": 42})
+		if msg == "" {
+			t.Error("expected non-empty message for non-string msg")
+		}
+	})
+
+	t.Run("Integer", func(t *testing.T) {
+		t.Parallel()
+		msg := extractViolationMessage(42)
+		if msg != "42" {
+			t.Errorf("expected '42', got %q", msg)
+		}
+	})
+
+	t.Run("Bool", func(t *testing.T) {
+		t.Parallel()
+		msg := extractViolationMessage(true)
+		if msg != "true" {
+			t.Errorf("expected 'true', got %q", msg)
+		}
+	})
+}
+
+func TestCloneInputWithParameters(t *testing.T) {
+	t.Parallel()
+
+	t.Run("MapInput", func(t *testing.T) {
+		t.Parallel()
+		input := map[string]any{
+			"review": map[string]any{"object": map[string]any{}},
+		}
+		params := map[string]any{"maxReplicas": float64(3)}
+
+		result := cloneInputWithParameters(input, params)
+
+		m, ok := result.(map[string]any)
+		if !ok {
+			t.Fatal("expected result to be a map")
+		}
+
+		// Original input should not be modified.
+		if _, exists := input["parameters"]; exists {
+			t.Error("original input should not be modified")
+		}
+
+		// Clone should have parameters.
+		p, ok := m["parameters"].(map[string]any)
+		if !ok {
+			t.Fatal("expected parameters in clone")
+		}
+		if p["maxReplicas"] != float64(3) {
+			t.Errorf("expected maxReplicas=3, got %v", p["maxReplicas"])
+		}
+
+		// Clone should preserve existing keys.
+		if _, ok := m["review"]; !ok {
+			t.Error("expected review key preserved in clone")
+		}
+	})
+
+	t.Run("NonMapInput", func(t *testing.T) {
+		t.Parallel()
+		input := "not a map"
+		params := map[string]any{"key": "value"}
+
+		result := cloneInputWithParameters(input, params)
+		if result != "not a map" {
+			t.Errorf("expected non-map input returned unchanged, got %v", result)
+		}
+	})
+
+	t.Run("NilInput", func(t *testing.T) {
+		t.Parallel()
+		params := map[string]any{"key": "value"}
+		result := cloneInputWithParameters(nil, params)
+		if result != nil {
+			t.Errorf("expected nil returned for nil input, got %v", result)
+		}
+	})
+}
+
+func TestEval_GatekeeperViolationMap(t *testing.T) {
+	t.Parallel()
+
+	// End-to-end test: Gatekeeper-style violation rule through the eval pipeline.
+	module := `
 package test
 
 import rego.v1
@@ -679,62 +788,47 @@ violation contains {"msg": msg} if {
     msg := "missing required label: app"
 }
 `
-		compiler := compileModule(t, "test", module)
-		e := &evaler{c: compiler}
+	compiler := compileModule(t, "test", module)
+	e := &evaler{c: compiler}
 
-		pack := &policyPack{
-			Name: "test",
-			Policies: []*policyRule{
-				{Name: "violation", Level: mandatoryRule, Scope: resourceScope},
-			},
-		}
+	pack := &policyPack{
+		Name: "test",
+		Policies: []*policyRule{
+			{Name: "violation", Level: mandatoryRule, Scope: resourceScope},
+		},
+	}
 
-		input := map[string]any{
-			"review": map[string]any{
-				"object": map[string]any{
-					"metadata": map[string]any{
-						"labels": map[string]any{},
-					},
+	input := map[string]any{
+		"review": map[string]any{
+			"object": map[string]any{
+				"metadata": map[string]any{
+					"labels": map[string]any{},
 				},
 			},
-		}
+		},
+	}
 
-		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+	results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-		if len(results) != 1 {
-			t.Fatalf("expected 1 result, got %d", len(results))
-		}
-		if results[0].msg != "missing required label: app" {
-			t.Errorf("expected violation message, got %q", results[0].msg)
-		}
-	})
-
-	t.Run("MapWithoutMsg", func(t *testing.T) {
-		t.Parallel()
-		// A map without "msg" should fall back to fmt.Sprintf.
-		msg := extractViolationMessage(map[string]any{"details": "something"})
-		if msg == "" {
-			t.Error("expected non-empty message for map without msg key")
-		}
-	})
-
-	t.Run("StringValue", func(t *testing.T) {
-		t.Parallel()
-		msg := extractViolationMessage("plain string")
-		if msg != "plain string" {
-			t.Errorf("expected 'plain string', got %q", msg)
-		}
-	})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].msg != "missing required label: app" {
+		t.Errorf("expected violation message, got %q", results[0].msg)
+	}
 }
 
 func TestEval_InputParameters(t *testing.T) {
 	t.Parallel()
 
-	// Gatekeeper-style rule accessing input.parameters.
-	module := `
+	t.Run("Injected", func(t *testing.T) {
+		t.Parallel()
+
+		// Gatekeeper-style rule accessing input.parameters.
+		module := `
 package test
 
 import rego.v1
@@ -745,50 +839,231 @@ violation contains {"msg": msg} if {
     msg := sprintf("replicas %d exceeds max %d", [input.review.object.spec.replicas, max])
 }
 `
-	dir := writeRegoFile(t, "policy.rego", module)
-	pack, e, err := loadPolicyPack(dir)
-	if err != nil {
-		t.Fatalf("loadPolicyPack failed: %v", err)
-	}
-	pack.InputFormat = InputFormatKubernetesAdmission
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		pack.InputFormat = InputFormatKubernetesAdmission
 
-	config := map[string]plugin.AnalyzerPolicyConfig{
-		"violation": {
-			Properties: map[string]any{
-				"maxReplicas": float64(3),
-			},
-		},
-	}
-
-	// Input with replicas=5 should violate.
-	input := map[string]any{
-		"review": map[string]any{
-			"object": map[string]any{
-				"spec": map[string]any{
-					"replicas": float64(5),
+		config := map[string]plugin.AnalyzerPolicyConfig{
+			"violation": {
+				Properties: map[string]any{
+					"maxReplicas": float64(3),
 				},
 			},
-		},
-	}
+		}
 
-	results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
-	if err != nil {
-		t.Fatalf("evalPolicyPack failed: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 violation, got %d", len(results))
-	}
-	if results[0].msg != "replicas 5 exceeds max 3" {
-		t.Errorf("unexpected message: %s", results[0].msg)
-	}
+		// Input with replicas=5 should violate.
+		input := map[string]any{
+			"review": map[string]any{
+				"object": map[string]any{
+					"spec": map[string]any{
+						"replicas": float64(5),
+					},
+				},
+			},
+		}
 
-	// Input with replicas=2 should pass.
-	input["review"].(map[string]any)["object"].(map[string]any)["spec"].(map[string]any)["replicas"] = float64(2)
-	results, err = e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
-	if err != nil {
-		t.Fatalf("evalPolicyPack failed: %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 violations, got %d", len(results))
-	}
+		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("expected 1 violation, got %d", len(results))
+		}
+		if results[0].msg != "replicas 5 exceeds max 3" {
+			t.Errorf("unexpected message: %s", results[0].msg)
+		}
+
+		// Input with replicas=2 should pass.
+		input = map[string]any{
+			"review": map[string]any{
+				"object": map[string]any{
+					"spec": map[string]any{
+						"replicas": float64(2),
+					},
+				},
+			},
+		}
+		results, err = e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("expected 0 violations, got %d", len(results))
+		}
+	})
+
+	t.Run("NotInjectedWhenNonAdmissionFormat", func(t *testing.T) {
+		t.Parallel()
+
+		// Rule references input.parameters but pack is NOT kubernetes-admission.
+		// Parameters should NOT be injected, so the rule should not fire.
+		module := `
+package test
+
+import rego.v1
+
+violation contains {"msg": msg} if {
+    max := input.parameters.maxReplicas
+    input.replicas > max
+    msg := "too many replicas"
+}
+`
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		// InputFormat is "" (default) — parameters should NOT be injected.
+
+		config := map[string]plugin.AnalyzerPolicyConfig{
+			"violation": {
+				Properties: map[string]any{
+					"maxReplicas": float64(3),
+				},
+			},
+		}
+
+		input := map[string]any{"replicas": float64(5)}
+		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
+		// Rule should not fire because input.parameters is undefined (not injected).
+		if len(results) != 0 {
+			t.Errorf("expected 0 violations (parameters not injected without admission format), got %d", len(results))
+		}
+	})
+
+	t.Run("NotInjectedWhenRuleNotInConfig", func(t *testing.T) {
+		t.Parallel()
+
+		// Admission format is active, but the rule has no config entry.
+		// Parameters should not be injected, so rule should not fire.
+		module := `
+package test
+
+import rego.v1
+
+violation contains {"msg": msg} if {
+    max := input.parameters.maxReplicas
+    input.review.object.spec.replicas > max
+    msg := "too many replicas"
+}
+`
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		pack.InputFormat = InputFormatKubernetesAdmission
+
+		// Config exists but has no entry for "violation".
+		config := map[string]plugin.AnalyzerPolicyConfig{
+			"other_rule": {
+				Properties: map[string]any{"maxReplicas": float64(3)},
+			},
+		}
+
+		input := map[string]any{
+			"review": map[string]any{
+				"object": map[string]any{
+					"spec": map[string]any{"replicas": float64(5)},
+				},
+			},
+		}
+		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("expected 0 violations (no config for this rule), got %d", len(results))
+		}
+	})
+
+	t.Run("NotInjectedWhenPropertiesEmpty", func(t *testing.T) {
+		t.Parallel()
+
+		// Admission format active, rule has config entry but Properties is empty.
+		module := `
+package test
+
+import rego.v1
+
+violation contains {"msg": msg} if {
+    max := input.parameters.maxReplicas
+    input.review.object.spec.replicas > max
+    msg := "too many replicas"
+}
+`
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		pack.InputFormat = InputFormatKubernetesAdmission
+
+		config := map[string]plugin.AnalyzerPolicyConfig{
+			"violation": {
+				Properties: map[string]any{},
+			},
+		}
+
+		input := map[string]any{
+			"review": map[string]any{
+				"object": map[string]any{
+					"spec": map[string]any{"replicas": float64(5)},
+				},
+			},
+		}
+		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, config)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("expected 0 violations (empty properties), got %d", len(results))
+		}
+	})
+
+	t.Run("NilPolicyConfig", func(t *testing.T) {
+		t.Parallel()
+
+		// Admission format active but policyConfig is nil.
+		// Should not crash, parameters not injected.
+		module := `
+package test
+
+import rego.v1
+
+violation contains {"msg": msg} if {
+    not input.review.object.metadata.labels["app"]
+    msg := "no app label"
+}
+`
+		dir := writeRegoFile(t, "policy.rego", module)
+		pack, e, err := loadPolicyPack(dir)
+		if err != nil {
+			t.Fatalf("loadPolicyPack failed: %v", err)
+		}
+		pack.InputFormat = InputFormatKubernetesAdmission
+
+		input := map[string]any{
+			"review": map[string]any{
+				"object": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{},
+					},
+				},
+			},
+		}
+		results, err := e.evalPolicyPack(context.Background(), pack, input, resourceScope, nil)
+		if err != nil {
+			t.Fatalf("evalPolicyPack failed: %v", err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("expected 1 violation, got %d", len(results))
+		}
+	})
 }

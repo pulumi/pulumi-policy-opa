@@ -156,3 +156,93 @@ func TestKubernetesAdmission_Integration(t *testing.T) {
 		}
 	})
 }
+
+// TestKubernetesAdmission_AnalyzeStack verifies stack-level evaluation with
+// kubernetes-admission format: non-K8s resources are filtered out before
+// evaluation, and Gatekeeper-style stack rules fire correctly.
+func TestKubernetesAdmission_AnalyzeStack(t *testing.T) {
+	t.Parallel()
+
+	// A stack-level Gatekeeper rule that counts deployments missing the "app" label.
+	module := `
+package test
+
+import rego.v1
+
+stack_violation contains {"msg": msg} if {
+    r := input.resources[_]
+    not r.review.object.metadata.labels["app"]
+    msg := sprintf("resource '%s' is missing required label: app", [r.review.name])
+}
+`
+	dir := t.TempDir()
+	manifest := "description: test\nruntime: opa\ninputFormat: kubernetes-admission\n"
+	if err := os.WriteFile(filepath.Join(dir, "PulumiPolicy.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "policy.rego"), []byte(module), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pack, e, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	a := NewAnalyzer(pack, e)
+
+	resources := []plugin.AnalyzerStackResource{
+		{
+			AnalyzerResource: plugin.AnalyzerResource{
+				URN:  resource.URN("urn:pulumi:stack::proj::kubernetes:apps/v1:Deployment::bad-deploy"),
+				Type: tokens.Type("kubernetes:apps/v1:Deployment"),
+				Name: "bad-deploy",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{
+					"metadata": map[string]any{
+						"name":   "bad-deploy",
+						"labels": map[string]any{},
+					},
+					"spec": map[string]any{"replicas": float64(1)},
+				}),
+			},
+		},
+		{
+			AnalyzerResource: plugin.AnalyzerResource{
+				URN:  resource.URN("urn:pulumi:stack::proj::kubernetes:apps/v1:Deployment::good-deploy"),
+				Type: tokens.Type("kubernetes:apps/v1:Deployment"),
+				Name: "good-deploy",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{
+					"metadata": map[string]any{
+						"name":   "good-deploy",
+						"labels": map[string]any{"app": "web"},
+					},
+					"spec": map[string]any{"replicas": float64(2)},
+				}),
+			},
+		},
+		// Non-K8s resource — should be filtered out, not cause false positives.
+		{
+			AnalyzerResource: plugin.AnalyzerResource{
+				URN:  resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::my-bucket"),
+				Type: tokens.Type("aws:s3/bucket:Bucket"),
+				Name: "my-bucket",
+				Properties: resource.NewPropertyMapFromMap(map[string]any{
+					"acl": "private",
+				}),
+			},
+		},
+	}
+
+	resp, err := a.AnalyzeStack(resources)
+	if err != nil {
+		t.Fatalf("AnalyzeStack failed: %v", err)
+	}
+
+	// Only bad-deploy should violate; good-deploy has "app" label; AWS bucket is filtered.
+	if len(resp.Diagnostics) != 1 {
+		t.Fatalf("expected 1 violation, got %d: %v", len(resp.Diagnostics), resp.Diagnostics)
+	}
+	if resp.Diagnostics[0].Message != "resource 'bad-deploy' is missing required label: app" {
+		t.Errorf("unexpected message: %s", resp.Diagnostics[0].Message)
+	}
+}
