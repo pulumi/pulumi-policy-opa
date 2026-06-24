@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Improvements
+
+- **Unrecognized rule names now warn**: OPA rules with names that lack a recognized prefix
+  (`deny`, `violation`, `warn`, `stack_deny`, `stack_warn`) now emit a clear stderr warning
+  explaining the rule won't be evaluated and how to rename it. Previously these were silently
+  skipped. (#42)
+- **`input.props` and `input.__props` aliases**: Resource properties are now also available
+  under `input.props` and `input.__props`, aliasing the existing `input.properties` and
+  `input.__properties`, to match the Node policy SDK convention. (#42)
+
 ## v1.1.0
 
 ### New Features
