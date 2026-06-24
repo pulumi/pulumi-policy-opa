@@ -293,8 +293,9 @@ func buildProviderMap(r plugin.AnalyzerResource) map[string]any {
 //
 // If a resource property has the same key as a metadata field, the resource property
 // takes precedence for backwards compatibility. Policy authors can use the __-prefixed
-// versions (__type, __urn, __name, __options, __provider, __properties) to reliably
-// access metadata regardless of property name collisions.
+// versions (__type, __urn, __name, __options, __provider, __properties/__props) to
+// reliably access metadata regardless of property name collisions. The "props" key is
+// a backwards-compatible alias for "properties".
 func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	obj := make(map[string]any)
 
@@ -312,7 +313,12 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 
 	// Expose the properties as a nested "properties" bag so that policies
 	// can access them via input.properties.<key> without metadata key collisions.
-	obj["properties"] = r.Properties.Mappable()
+	// "props" is a backwards-compatible alias for the same bag: authors coming from
+	// the Node Policy SDK frequently reach for input.props by muscle memory, and a
+	// silent miss there produces a rule that never fires. Both point at the same map.
+	propsBag := r.Properties.Mappable()
+	obj["properties"] = propsBag
+	obj["props"] = propsBag
 
 	// Overlay resource properties so they take precedence over metadata
 	// fields at the top level for backwards compatibility.
@@ -330,6 +336,7 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	obj["__name"] = r.Name
 	obj["__options"] = opts
 	obj["__properties"] = r.Properties.Mappable()
+	obj["__props"] = r.Properties.Mappable()
 	obj["__provider"] = providerInfo
 
 	return obj

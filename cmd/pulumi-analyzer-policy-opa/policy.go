@@ -50,6 +50,17 @@ var (
 	stackWarnRulePrefix = regexp.MustCompile("^stack_warn(_[a-zA-Z0-9]+)*$")
 )
 
+// ruleLikeNamePrefix matches rule names that look like they were intended to be
+// evaluated rules but use the wrong casing, a near-miss spelling, or a malformed
+// separator (e.g. "Deny", "denies", "denyPublic", "deny-public", "stack_deniy").
+// It is deliberately anchored on the recognized intent keywords plus a few common
+// LLM/human misspellings so that legitimate helper routines (e.g. "is_public",
+// "valid_cidr", "has_encryption") never trip the warning. A match here that is NOT
+// also matched by one of the exact prefix regexes above indicates a rule that will
+// be silently skipped, which warnUnrecognizedRule reports.
+var ruleLikeNamePrefix = regexp.MustCompile(
+	`(?i)^(stack[_-]?)?(deny|denies|denied|violation|violations|violate|warn|warns|warning|warnings)`)
+
 // loadPolicyPack loads the metadata about a pack and its policies from a directory containing OPA *.rego files.
 func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	// Read the optional PulumiPolicy.yaml manifest for pack metadata.
@@ -150,6 +161,12 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 				level = advisoryRule
 				scope = resourceScope
 			} else {
+				// This rule does not match any recognized prefix, so it will be
+				// treated as a library routine and never evaluated. If the name
+				// looks like it was *meant* to be a rule (wrong casing, a typo, or
+				// a bad separator), warn loudly so the author gets a signal instead
+				// of a rule that silently never fires.
+				warnUnrecognizedRule(ruleName, name)
 				continue // skip
 			}
 
@@ -223,6 +240,26 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	e := &evaler{c: compiler}
 
 	return pack, e, nil
+}
+
+// warnUnrecognizedRule emits a one-time stderr warning for a rule whose name looks
+// like it was intended to be an evaluated rule but does not match a recognized
+// prefix, so it is silently treated as a helper and never runs. The message names
+// the rule, explains why it won't run, and shows how to fix it. It mirrors the
+// stderr style used by warnMissingConfig.
+//
+// Rules that don't look rule-like at all (legitimate helpers such as "is_public")
+// are not reported.
+func warnUnrecognizedRule(ruleName, module string) {
+	if !ruleLikeNamePrefix.MatchString(ruleName) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: rule %q in module %q will NOT be evaluated because its name does not "+
+		"match a recognized rule prefix; it is being treated as a helper routine. "+
+		"Rename it to start with one of: deny, deny_<name>, violation, violation_<name>, warn, warn_<name> "+
+		"(resource-level), or stack_deny, stack_violation, stack_warn (stack-level). "+
+		"Prefixes are case-sensitive and use underscores (e.g. \"deny_public_buckets\", not \"denyPublicBuckets\").\n",
+		ruleName, module)
 }
 
 // policyPack holds the metadata for a complete Pulumi policy package.

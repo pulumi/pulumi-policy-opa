@@ -300,6 +300,13 @@ input.acl              # e.g. "public-read"
 input.bucketName       # e.g. "my-bucket"
 ```
 
+> **There is no `args.props` here.** Properties live at the **top level** of `input`
+> (`input.acl`) and in the **`input.properties`** bag (`input.properties.acl`). The Node.js
+> Policy SDK exposes resource inputs as `args.props`, which trips up authors porting rules:
+> in OPA there is no `args` object. For convenience `input.props` is accepted as an alias for
+> `input.properties`, but prefer `input.<property>` or `input.properties.<property>` — a typo'd
+> path like `input.args.props.acl` is simply `undefined` and silently makes the rule never fire.
+
 ### Metadata Fields
 
 The following metadata fields are also available at the top level. If a resource property has the same key as a metadata field, the property takes precedence. Use the `__`-prefixed versions for guaranteed access:
@@ -312,6 +319,7 @@ The following metadata fields are also available at the top level. If a resource
 | `input.options` | `input.__options` | Resource options (see below) |
 | `input.provider` | `input.__provider` | Provider information (see below) |
 | `input.properties` | `input.__properties` | Nested properties bag |
+| `input.props` | `input.__props` | Alias for `input.properties` (see callout above) |
 
 ### Resource Options
 
@@ -783,7 +791,12 @@ All `.rego` files in a policy pack **must** use the same package name. Subpackag
 
 ### Rule Prefixes and Severity
 
-Rules are identified by their name prefix, which determines the enforcement level and scope:
+**The rule name prefix is the API.** A rule is only evaluated if its name matches one of
+the recognized prefixes below. Any rule whose name doesn't match is treated as a helper
+("library routine") and is **never evaluated** — it will not fire, pass, or fail. There is
+no separate annotation or registration step: the prefix alone decides whether a rule runs.
+
+The prefixes are **case-sensitive** and use **underscores** as separators:
 
 **Resource-level rules** (evaluated per-resource via `Analyze`):
 - **`deny[msg]`** or **`violation[msg]`** - Mandatory (blocks deployment)
@@ -794,6 +807,13 @@ Rules are identified by their name prefix, which determines the enforcement leve
 - **`stack_warn[msg]`** - Advisory (shows warning only)
 
 Rules can include a suffix for disambiguation (e.g. `deny_public_buckets`, `stack_warn_orphan_sgs`).
+
+> **Common silent failure:** a misnamed rule simply doesn't run — no error, no violation.
+> `denyPublicBuckets` (camelCase), `denies_public` (typo), and `Deny_Public` (wrong case)
+> are all treated as helpers and skipped. When the analyzer detects a name that *looks* like
+> a mistyped rule, it prints a `warning:` to stderr naming the rule and how to fix it, but the
+> safest habit is to copy a working prefix exactly: `deny`, `deny_<name>`, `violation`,
+> `violation_<name>`, `warn`, `warn_<name>`, or the `stack_`-prefixed forms.
 
 ```rego
 # METADATA
@@ -876,6 +896,22 @@ deny_workload_security[msg] {
 
 Always create fixtures for both valid (should pass) and invalid (should fail) configurations.
 
+### 5. Know the Rego Idioms That Bite
+
+A handful of Rego idioms look correct but silently make a rule fire on 0% or 100% of
+resources. These are the most common ways a policy "passes" without ever doing anything:
+
+| Goal | ✅ Do this | ❌ Not this | Why the wrong form fails silently |
+|------|-----------|------------|-----------------------------------|
+| "collection is empty / missing" | `count(input.tags) == 0` | `not input.tags` | `not input.tags` is only true when the key is **absent**. An empty list/object (`[]`, `{}`) is still "defined", so the rule fires on 0% of real resources. |
+| "key exists" | `input.encryption` | `input.encryption == true` | A non-boolean (e.g. a config block) is truthy in `input.encryption` but `!= true`, so the equality form fires on 0%. |
+| "no element matches" | `count([x | x := input.rules[_]; bad(x)]) == 0` | `not input.rules[_]` | `not input.rules[_]` negates over the whole collection and rarely means what you expect. |
+| read a property | `input.acl` or `input.properties.acl` | `input.args.props.acl` | There is no `args` object (that's the Node SDK). The path is `undefined`, so the rule never fires. |
+
+When in doubt, run `opa eval` against a fixture you *know* should violate and confirm you
+get a result — a rule that returns nothing on a known-bad input is the tell-tale sign of one
+of the idioms above. See [Testing Your Policies](#testing-your-policies).
+
 ---
 
 ## Troubleshooting
@@ -888,9 +924,10 @@ Always create fixtures for both valid (should pass) and invalid (should fail) co
 
 ### Violations not shown
 
-1. Rule must use a recognized prefix: `deny`, `violation`, `warn`, `stack_deny`, `stack_violation`, or `stack_warn`
-2. Verify the input structure matches your resource type
-3. Use `pulumi preview --policy-pack ./policies --debug` for verbose output
+1. Rule must use a recognized prefix: `deny`, `violation`, `warn`, `stack_deny`, `stack_violation`, or `stack_warn`. Prefixes are **case-sensitive** and use **underscores** (`deny_public`, not `denyPublic` or `Deny_Public`). A misnamed rule is silently treated as a helper and never runs — watch stderr for a `warning: rule ... will NOT be evaluated` message.
+2. Check your Rego idioms — `not input.tags` does **not** mean "tags is empty"; use `count(input.tags) == 0`. See [Best Practices → Know the Rego Idioms That Bite](#5-know-the-rego-idioms-that-bite).
+3. Verify the input structure matches your resource type (properties are at the top level or under `input.properties`, never under `input.args`).
+4. Use `pulumi preview --policy-pack ./policies --debug` for verbose output
 
 ### Gatekeeper rules not firing
 

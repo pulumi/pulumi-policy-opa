@@ -750,3 +750,170 @@ deny[msg] {
 		t.Errorf("expected duplicate rule warning on stderr, got: %q", stderrOutput)
 	}
 }
+
+// loadPolicyPackCapturingStderr loads a policy pack from the given Rego source while
+// capturing everything written to os.Stderr, returning the captured output. Because it
+// swaps os.Stderr it must not run in parallel.
+func loadPolicyPackCapturingStderr(t *testing.T, rego string) (*policyPack, string) {
+	t.Helper()
+	dir := writeRegoFile(t, "policy.rego", rego)
+
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+
+	pack, _, loadErr := loadPolicyPack(dir)
+
+	_ = w.Close()
+	os.Stderr = origStderr
+
+	stderrBytes, _ := io.ReadAll(r)
+	if loadErr != nil {
+		t.Fatalf("loadPolicyPack failed: %v", loadErr)
+	}
+	return pack, string(stderrBytes)
+}
+
+// TestLoadPolicies_WarnsOnUnrecognizedRule verifies that rules whose names look like
+// they were intended to be evaluated rules — but use the wrong casing, a near-miss
+// spelling, or a bad separator — produce a loud stderr warning and are not evaluated.
+// These tests capture os.Stderr so they must not run in parallel.
+func TestLoadPolicies_WarnsOnUnrecognizedRule(t *testing.T) {
+	cases := []struct {
+		name     string
+		ruleName string
+		rego     string
+	}{
+		{
+			name:     "WrongCase",
+			ruleName: "denyPublicBuckets",
+			rego: `
+package test
+
+denyPublicBuckets[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
+		{
+			name:     "Misspelling",
+			ruleName: "denies_public",
+			rego: `
+package test
+
+denies_public[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
+		{
+			name:     "StackMisspelling",
+			ruleName: "stack_denies_public",
+			rego: `
+package test
+
+stack_denies_public[msg] {
+    r := input.resources[_]
+    r.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
+		{
+			name:     "StackWrongCase",
+			ruleName: "stackDeny",
+			rego: `
+package test
+
+stackDeny[msg] {
+    count(input.resources) > 10
+    msg := "too many resources"
+}
+`,
+		},
+		{
+			name:     "WarningTypo",
+			ruleName: "warning_no_tags",
+			rego: `
+package test
+
+warning_no_tags[msg] {
+    not input.tags
+    msg := "missing tags"
+}
+`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pack, stderrOutput := loadPolicyPackCapturingStderr(t, tc.rego)
+
+			// The rule must not have been loaded as an evaluated policy.
+			if r := findRule(pack, tc.ruleName); r != nil {
+				t.Errorf("expected rule %q to be skipped, but it was loaded", tc.ruleName)
+			}
+
+			// A warning naming the rule and explaining the fix must be emitted.
+			if !strings.Contains(stderrOutput, "will NOT be evaluated") {
+				t.Errorf("expected unrecognized-rule warning, got: %q", stderrOutput)
+			}
+			if !strings.Contains(stderrOutput, tc.ruleName) {
+				t.Errorf("expected warning to name the rule %q, got: %q", tc.ruleName, stderrOutput)
+			}
+			if !strings.Contains(stderrOutput, "Rename it to start with") {
+				t.Errorf("expected warning to explain the fix, got: %q", stderrOutput)
+			}
+		})
+	}
+}
+
+// TestLoadPolicies_NoWarnOnLegitimateHelpers verifies that genuine helper routines —
+// names that do not look like a mistyped rule — are silently treated as library
+// routines without triggering the unrecognized-rule warning.
+// This test captures os.Stderr so it must not run in parallel.
+func TestLoadPolicies_NoWarnOnLegitimateHelpers(t *testing.T) {
+	rego := `
+package test
+
+is_public {
+    input.acl == "public-read"
+}
+
+valid_cidr(cidr) {
+    cidr != "0.0.0.0/0"
+}
+
+has_encryption {
+    input.serverSideEncryptionConfiguration
+}
+
+deny[msg] {
+    is_public
+    msg := "public ACL not allowed"
+}
+`
+	pack, stderrOutput := loadPolicyPackCapturingStderr(t, rego)
+
+	// The real rule should still load.
+	if findRule(pack, "deny") == nil {
+		t.Error("expected deny rule to be loaded")
+	}
+
+	// None of the helpers should be loaded as evaluated rules.
+	for _, helper := range []string{"is_public", "valid_cidr", "has_encryption"} {
+		if findRule(pack, helper) != nil {
+			t.Errorf("helper %q should not be loaded as a policy", helper)
+		}
+	}
+
+	// No unrecognized-rule warning should have been emitted.
+	if strings.Contains(stderrOutput, "will NOT be evaluated") {
+		t.Errorf("did not expect unrecognized-rule warning for helpers, got: %q", stderrOutput)
+	}
+}

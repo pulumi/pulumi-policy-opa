@@ -342,6 +342,65 @@ func TestBuildInput(t *testing.T) {
 		}
 	})
 
+	t.Run("PropsAlias", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		input := buildOPAInput(r)
+
+		// "props" is a backwards-compatible alias for "properties".
+		props, ok := input["props"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"props\"] to be a map")
+		}
+		if props["acl"] != "private" {
+			t.Errorf("expected props.acl = \"private\", got %v", props["acl"])
+		}
+
+		// __props is the collision-safe escape hatch, mirroring __properties.
+		dprops, ok := input["__props"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"__props\"] to be a map")
+		}
+		if dprops["acl"] != "private" {
+			t.Errorf("expected __props.acl = \"private\", got %v", dprops["acl"])
+		}
+
+		// props and properties should expose the same contents.
+		properties, ok := input["properties"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"properties\"] to be a map")
+		}
+		if props["acl"] != properties["acl"] {
+			t.Errorf("expected props and properties to match: props=%v properties=%v", props, properties)
+		}
+	})
+
+	t.Run("PropsAliasCollision", func(t *testing.T) {
+		t.Parallel()
+		r := makeResource()
+		r.Properties = resource.NewPropertyMapFromMap(map[string]any{
+			"props": "some-value",
+			"acl":   "private",
+		})
+
+		input := buildOPAInput(r)
+
+		// A resource property literally named "props" wins at the top level
+		// (consistent with how "properties" collisions are handled).
+		if input["props"] != "some-value" {
+			t.Errorf("expected resource property to take precedence at top level, got %v", input["props"])
+		}
+
+		// The collision-safe escape hatch still exposes the property bag.
+		dprops, ok := input["__props"].(map[string]any)
+		if !ok {
+			t.Fatal("expected input[\"__props\"] to be a map")
+		}
+		if dprops["acl"] != "private" {
+			t.Errorf("expected __props.acl = \"private\", got %v", dprops["acl"])
+		}
+	})
+
 	t.Run("PropertiesBagCollision", func(t *testing.T) {
 		t.Parallel()
 		r := makeResource()
@@ -614,9 +673,9 @@ func TestParseK8sTypeToken(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		token   string
-		want    *k8sTypeInfo
+		name  string
+		token string
+		want  *k8sTypeInfo
 	}{
 		{
 			name:  "apps/v1 Deployment",
