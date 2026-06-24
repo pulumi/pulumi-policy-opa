@@ -848,6 +848,58 @@ warning_no_tags[msg] {
 }
 `,
 		},
+		{
+			// The owner's explicit example: an imperative policy verb with no
+			// recognized prefix. Caught by both the broadened name heuristic and the
+			// set-producing shape.
+			name:     "ImperativeRequire",
+			ruleName: "require_versioning",
+			rego: `
+package test
+
+require_versioning[msg] {
+    input.type == "aws:s3/bucket:Bucket"
+    not input.versioning.enabled
+    msg := "versioning must be enabled"
+}
+`,
+		},
+		{
+			name:     "ImperativeMust",
+			ruleName: "must_have_tags",
+			rego: `
+package test
+
+must_have_tags[msg] {
+    not input.tags
+    msg := "resources must have tags"
+}
+`,
+		},
+		{
+			name:     "ImperativeEnsure",
+			ruleName: "ensure_https",
+			rego: `
+package test
+
+ensure_https[msg] {
+    input.protocol != "https"
+    msg := "https must be used"
+}
+`,
+		},
+		{
+			name:     "ImperativeCheck",
+			ruleName: "check_public",
+			rego: `
+package test
+
+check_public[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -873,10 +925,43 @@ warning_no_tags[msg] {
 	}
 }
 
+// TestLoadPolicies_WarnsOnPolicyShapedRule verifies the primary, name-independent
+// trigger: a partial set rule that builds up a collection of messages (the deny/warn
+// shape) is flagged even when its name matches no keyword heuristic, because its shape
+// is the strongest signal the author meant it to be a policy. This test captures
+// os.Stderr so it must not run in parallel.
+func TestLoadPolicies_WarnsOnPolicyShapedRule(t *testing.T) {
+	rego := `
+package test
+
+s3_bucket_policy[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`
+	pack, stderrOutput := loadPolicyPackCapturingStderr(t, rego)
+
+	if findRule(pack, "s3_bucket_policy") != nil {
+		t.Error("expected policy-shaped but unprefixed rule to be skipped, but it was loaded")
+	}
+	if !strings.Contains(stderrOutput, "will NOT be evaluated") {
+		t.Errorf("expected warning for policy-shaped rule, got: %q", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "s3_bucket_policy") {
+		t.Errorf("expected warning to name the rule, got: %q", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "set of messages") {
+		t.Errorf("expected warning to cite the set-producing shape, got: %q", stderrOutput)
+	}
+}
+
 // TestLoadPolicies_NoWarnOnLegitimateHelpers verifies that genuine helper routines —
-// names that do not look like a mistyped rule — are silently treated as library
-// routines without triggering the unrecognized-rule warning.
-// This test captures os.Stderr so it must not run in parallel.
+// boolean rules, value rules, and functions whose names do not look like a mistyped
+// rule — are silently treated as library routines without triggering the
+// unrecognized-rule warning. These are distinguished from policies by shape: a real
+// policy is a partial set/object rule (Head.Key set, no args), whereas helpers are
+// booleans, values, or functions. This test captures os.Stderr so it must not run in
+// parallel.
 func TestLoadPolicies_NoWarnOnLegitimateHelpers(t *testing.T) {
 	rego := `
 package test
@@ -885,34 +970,42 @@ is_public {
     input.acl == "public-read"
 }
 
-valid_cidr(cidr) {
-    cidr != "0.0.0.0/0"
+is_exempt {
+    input.tags.exempt == "true"
 }
 
 has_encryption {
     input.serverSideEncryptionConfiguration
 }
 
-deny[msg] {
+required_labels = ["env", "owner"]
+
+valid_cidr(cidr) {
+    cidr != "0.0.0.0/0"
+}
+
+deny_public[msg] {
     is_public
+    not is_exempt
     msg := "public ACL not allowed"
 }
 `
 	pack, stderrOutput := loadPolicyPackCapturingStderr(t, rego)
 
-	// The real rule should still load.
-	if findRule(pack, "deny") == nil {
-		t.Error("expected deny rule to be loaded")
+	// The real rule should still load with no warning.
+	if findRule(pack, "deny_public") == nil {
+		t.Error("expected deny_public rule to be loaded")
 	}
 
-	// None of the helpers should be loaded as evaluated rules.
-	for _, helper := range []string{"is_public", "valid_cidr", "has_encryption"} {
+	// None of the helpers should be loaded as evaluated rules; they remain usable as
+	// library routines (deny_public above references is_public/is_exempt and compiles).
+	for _, helper := range []string{"is_public", "is_exempt", "has_encryption", "required_labels", "valid_cidr"} {
 		if findRule(pack, helper) != nil {
 			t.Errorf("helper %q should not be loaded as a policy", helper)
 		}
 	}
 
-	// No unrecognized-rule warning should have been emitted.
+	// No unrecognized-rule warning should have been emitted for any helper.
 	if strings.Contains(stderrOutput, "will NOT be evaluated") {
 		t.Errorf("did not expect unrecognized-rule warning for helpers, got: %q", stderrOutput)
 	}
