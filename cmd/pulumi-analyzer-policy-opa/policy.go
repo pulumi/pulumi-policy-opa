@@ -215,7 +215,10 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 			}
 
 			if _, has := existing[ruleName]; has {
-				warnf(diagDuplicateRule, "duplicate rule %q in module %q; skipping the duplicate definition", ruleName, name)
+				warnf(diagDuplicateRule, "rule %q in module %q has the same name as an earlier rule; OPA still "+
+					"merges and evaluates every body with this name, so no logic is dropped — only the duplicate "+
+					"policy-metadata entry is skipped. Give the rules distinct names if you meant them to be "+
+					"separate policies.", ruleName, name)
 				continue
 			}
 			existing[ruleName] = struct{}{}

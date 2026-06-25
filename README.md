@@ -304,7 +304,9 @@ input.bucketName       # e.g. "my-bucket"
 > (`input.acl`) and in the **`input.properties`** bag (`input.properties.acl`). The Node.js
 > Policy SDK exposes resource inputs as `args.props`, which trips up authors porting rules:
 > in OPA there is no `args` object. For convenience `input.props` is accepted as an alias for
-> `input.properties`, but prefer `input.<property>` or `input.properties.<property>` — a typo'd
+> `input.properties`, but prefer `input.<property>` or `input.properties.<property>`. Like any
+> top-level field, `input.props`/`input.properties` can be shadowed by a resource property of the
+> same name — `input.__props`/`input.__properties` are always collision-safe. A typo'd
 > path like `input.args.props.acl` is simply `undefined`, and an undefined reference fails
 > silently in either direction: the rule matches **nothing**, or **everything** if the reference
 > sits under `not` (e.g. `not input.args.props.acl` is always true).
