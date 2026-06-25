@@ -51,10 +51,15 @@ var (
 )
 
 // ruleLikeNamePrefix matches rule names that look like they were intended to be
-// evaluated rules but use the wrong casing, a near-miss spelling, a malformed
-// separator (e.g. "Deny", "denies", "denyPublic", "deny-public", "stack_deniy"), or
-// an imperative policy verb that implies intent to enforce something
-// (e.g. "require_versioning", "must_have_tags", "ensure_https", "check_public").
+// evaluated rules but use the wrong casing or separator or a plural/conjugated form
+// (e.g. "Deny", "denyPublic", "deny-public", "denies"), or an imperative policy verb
+// that implies intent to enforce something (e.g. "require_versioning", "must_have_tags",
+// "ensure_https", "check_public").
+//
+// This is exact-keyword matching at a word boundary, not fuzzy spelling correction: an
+// arbitrary typo like "deniy" or "violaton" is NOT matched here. Such a rule can still
+// be flagged by the other warnUnrecognizedRule trigger if it has the set-producing shape
+// of a policy.
 //
 // Each keyword must be a discrete leading token — it has to be followed by a word
 // boundary (underscore, separator, end-of-name, or a camelCase capital/digit), not
@@ -78,6 +83,22 @@ var ruleLikeNamePrefix = regexp.MustCompile(
 		`prohibit|prohibits|forbid|forbids|restrict|restricts|block|blocks|` +
 		`prevent|prevents|mandate|mandates|reject|rejects` +
 		`)(_|-|[A-Z0-9]|$)`)
+
+// Authoring-time diagnostic codes. Each warning is emitted as "warning[<code>]: ..." so
+// tooling and LLM agents can recognize and gate on a diagnostic class by its stable code
+// without depending on the exact prose, which may change between releases.
+const (
+	diagUnrecognizedRule = "opa/unrecognized-rule"
+	diagZeroRules        = "opa/zero-rules"
+	diagDuplicateRule    = "opa/duplicate-rule"
+	diagMissingConfig    = "opa/missing-config"
+)
+
+// warnf writes a single authoring-time warning to stderr, tagged with a stable diagnostic
+// code: "warning[<code>]: <message>".
+func warnf(code, format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "warning[%s]: %s\n", code, fmt.Sprintf(format, args...))
+}
 
 // loadPolicyPack loads the metadata about a pack and its policies from a directory containing OPA *.rego files.
 func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
@@ -142,6 +163,7 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	// Build up a list of rules.
 	var packName string
 	var policies []*policyRule
+	totalRules := 0
 	existing := make(map[string]struct{})
 	for name, module := range compiler.Modules {
 		// First determine the package name. This should match for all rules.
@@ -158,6 +180,7 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 
 		// Next go through all rules and tease them apart, skipping duplicates.
 		for _, rule := range module.Rules {
+			totalRules++
 			ruleName := rule.Head.Name.String()
 
 			// Only process those that are legitimate errors or warnings. Other "rules" are
@@ -192,7 +215,7 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 			}
 
 			if _, has := existing[ruleName]; has {
-				fmt.Fprintf(os.Stderr, "warning: duplicate rule %q in module %q, skipping\n", ruleName, name)
+				warnf(diagDuplicateRule, "duplicate rule %q in module %q; skipping the duplicate definition", ruleName, name)
 				continue
 			}
 			existing[ruleName] = struct{}{}
@@ -222,6 +245,15 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 				Scope:       scope,
 			})
 		}
+	}
+
+	// A pack that evaluates no rules at all — every rule is a helper that matches no
+	// recognized prefix, or there are no rules — silently enforces nothing, which almost
+	// always indicates an authoring bug. Warn loudly (but don't fail to load) so it can't
+	// escape notice on a published pack while staying out of the way during incremental
+	// authoring.
+	if len(policies) == 0 {
+		warnZeroRules(packName, totalRules)
 	}
 
 	// Load optional config schemas from config-schema.json alongside the Rego files.
@@ -263,6 +295,34 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	return pack, e, nil
 }
 
+// warnZeroRules emits a loud, stable-coded banner when a policy pack would evaluate no
+// rules at all — either because every rule is a helper that matches no recognized prefix,
+// or because the pack is empty. Such a pack silently enforces nothing, so the warning is
+// formatted to be unmissable. It is a warning rather than a hard error so incremental
+// authoring (a pack briefly with no rules) is not blocked; a CI or publish gate can key off
+// the warning[opa/zero-rules] code to fail the build if it wants stricter behavior.
+func warnZeroRules(packName string, totalRules int) {
+	name := "this policy pack"
+	if packName != "" {
+		name = fmt.Sprintf("policy pack %q", packName)
+	}
+
+	var detail string
+	if totalRules == 0 {
+		detail = "it contains no policy rules at all"
+	} else {
+		detail = fmt.Sprintf("it defines %d rule(s) but none match a recognized prefix, so every "+
+			"rule is treated as a helper and no policy will ever run", totalRules)
+	}
+
+	const bar = "========================================================================"
+	fmt.Fprintf(os.Stderr, "%s\nwarning[%s]: %s will enforce NOTHING — %s. "+
+		"Fix: name at least one rule deny_/violation_/warn_ (resource) or "+
+		"stack_deny/stack_violation/stack_warn (stack), e.g. \"deny_public_buckets\". "+
+		"Prefixes are case-sensitive and use underscores.\n%s\n",
+		bar, diagZeroRules, name, detail, bar)
+}
+
 // warnUnrecognizedRule emits a one-time stderr warning for a rule that does not match
 // a recognized prefix — so it is silently treated as a helper and never runs — but
 // looks like it was meant to be evaluated. There are two independent triggers:
@@ -296,14 +356,13 @@ func warnUnrecognizedRule(ruleName, module string, policyShaped bool) {
 		reason = "its name implies intent to enforce a policy"
 	}
 
-	fmt.Fprintf(os.Stderr, "warning: rule %q in module %q will NOT be evaluated because its name does not "+
+	warnf(diagUnrecognizedRule, "rule %q in module %q will NOT be evaluated because its name does not "+
 		"match a recognized rule prefix, so it is being treated as a helper routine. It was flagged because "+
-		"%s. "+
-		"Rename it to start with one of: deny, deny_<name>, violation, violation_<name>, warn, warn_<name> "+
-		"(resource-level), or stack_deny, stack_violation, stack_warn (stack-level) — for example "+
-		"\"deny_public_buckets\", not \"denyPublicBuckets\" or \"require_versioning\". "+
-		"Prefixes are case-sensitive and use underscores. If this really is a helper routine and not a "+
-		"policy, you can ignore this warning or rename it so it no longer looks rule-like.\n",
+		"%s. Fix: rename it to start with one of deny, violation, warn (resource-level) or stack_deny, "+
+		"stack_violation, stack_warn (stack-level) — e.g. \"deny_public_buckets\", not \"denyPublicBuckets\" "+
+		"or \"require_versioning\". Prefixes are case-sensitive and use underscores. Advisory: if this really "+
+		"is a helper routine and not a policy, ignore this warning or rename it so it no longer looks "+
+		"rule-like.",
 		ruleName, module, reason)
 }
 

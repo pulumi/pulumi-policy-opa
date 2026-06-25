@@ -8,6 +8,14 @@
   (`deny`, `violation`, `warn`, `stack_deny`, `stack_warn`) now emit a clear stderr warning
   explaining the rule won't be evaluated and how to rename it. Previously these were silently
   skipped. (#42)
+- **Empty policy packs now warn loudly**: a pack that would evaluate no rules at all — every
+  rule is an unrecognized helper, or the pack is empty — now emits a prominent
+  `warning[opa/zero-rules]` banner, since such a pack silently enforces nothing. It remains a
+  warning (not an error) so incremental authoring isn't blocked. (#42)
+- **Stable diagnostic codes**: authoring-time warnings are now tagged with stable
+  `warning[opa/<code>]` identifiers (`opa/unrecognized-rule`, `opa/zero-rules`,
+  `opa/duplicate-rule`, `opa/missing-config`) and an explicit `Fix:` clause, so CI and agent
+  tooling can recognize and gate on a diagnostic class without parsing prose. (#42)
 - **`input.props` and `input.__props` aliases**: Resource properties are now also available
   under `input.props` and `input.__props`, aliasing the existing `input.properties` and
   `input.__properties`, to match the Node policy SDK convention. (#42)

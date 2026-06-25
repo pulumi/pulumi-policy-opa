@@ -746,17 +746,16 @@ deny[msg] {
 	}
 
 	// Verify that a warning was emitted for the duplicate rule.
-	if !strings.Contains(stderrOutput, "warning: duplicate rule") {
+	if !strings.Contains(stderrOutput, "warning[opa/duplicate-rule]") {
 		t.Errorf("expected duplicate rule warning on stderr, got: %q", stderrOutput)
 	}
 }
 
-// loadPolicyPackCapturingStderr loads a policy pack from the given Rego source while
-// capturing everything written to os.Stderr, returning the captured output. Because it
-// swaps os.Stderr it must not run in parallel.
-func loadPolicyPackCapturingStderr(t *testing.T, rego string) (*policyPack, string) {
+// loadDirCapturingStderr loads a policy pack from dir while capturing everything written
+// to os.Stderr, returning the loaded pack, the captured output, and any load error. Because
+// it swaps os.Stderr it must not run in parallel.
+func loadDirCapturingStderr(t *testing.T, dir string) (*policyPack, string, error) {
 	t.Helper()
-	dir := writeRegoFile(t, "policy.rego", rego)
 
 	origStderr := os.Stderr
 	r, w, err := os.Pipe()
@@ -771,10 +770,19 @@ func loadPolicyPackCapturingStderr(t *testing.T, rego string) (*policyPack, stri
 	os.Stderr = origStderr
 
 	stderrBytes, _ := io.ReadAll(r)
+	return pack, string(stderrBytes), loadErr
+}
+
+// loadPolicyPackCapturingStderr loads a policy pack from the given Rego source while
+// capturing everything written to os.Stderr, returning the captured output. It fails the
+// test if loading errors. Because it swaps os.Stderr it must not run in parallel.
+func loadPolicyPackCapturingStderr(t *testing.T, rego string) (*policyPack, string) {
+	t.Helper()
+	pack, out, loadErr := loadDirCapturingStderr(t, writeRegoFile(t, "policy.rego", rego))
 	if loadErr != nil {
 		t.Fatalf("loadPolicyPack failed: %v", loadErr)
 	}
-	return pack, string(stderrBytes)
+	return pack, out
 }
 
 // TestLoadPolicies_WarnsOnUnrecognizedRule verifies that rules whose names look like
@@ -911,14 +919,18 @@ check_public[msg] {
 				t.Errorf("expected rule %q to be skipped, but it was loaded", tc.ruleName)
 			}
 
-			// A warning naming the rule and explaining the fix must be emitted.
+			// A warning naming the rule and explaining the fix must be emitted, tagged with
+			// the stable diagnostic code.
+			if !strings.Contains(stderrOutput, "warning[opa/unrecognized-rule]") {
+				t.Errorf("expected stable diagnostic code, got: %q", stderrOutput)
+			}
 			if !strings.Contains(stderrOutput, "will NOT be evaluated") {
 				t.Errorf("expected unrecognized-rule warning, got: %q", stderrOutput)
 			}
 			if !strings.Contains(stderrOutput, tc.ruleName) {
 				t.Errorf("expected warning to name the rule %q, got: %q", tc.ruleName, stderrOutput)
 			}
-			if !strings.Contains(stderrOutput, "Rename it to start with") {
+			if !strings.Contains(stderrOutput, "Fix: rename") {
 				t.Errorf("expected warning to explain the fix, got: %q", stderrOutput)
 			}
 		})
@@ -1009,4 +1021,73 @@ deny_public[msg] {
 	if strings.Contains(stderrOutput, "will NOT be evaluated") {
 		t.Errorf("did not expect unrecognized-rule warning for helpers, got: %q", stderrOutput)
 	}
+}
+
+// TestLoadPolicies_ZeroRecognizedRules verifies that a policy pack which would evaluate
+// nothing — either because every rule is a helper that matches no recognized prefix, or
+// because the pack is empty — emits a loud, stable-coded warning, but still loads without
+// error. A pack that enforces nothing is almost always an authoring bug. These tests
+// capture os.Stderr so they must not run in parallel.
+func TestLoadPolicies_ZeroRecognizedRules(t *testing.T) {
+	t.Run("OnlyHelpers", func(t *testing.T) {
+		// Genuine helpers (a boolean and a function) — neither is policy-shaped nor
+		// rule-like by name, so they produce no per-rule warning, leaving the pack-level
+		// zero-rules banner as the only signal.
+		rego := `
+package test
+
+is_public {
+    input.acl == "public-read"
+}
+
+valid_cidr(cidr) {
+    cidr != "0.0.0.0/0"
+}
+`
+		pack, stderr := loadPolicyPackCapturingStderr(t, rego)
+
+		if len(pack.Policies) != 0 {
+			t.Fatalf("expected 0 evaluable policies, got %d", len(pack.Policies))
+		}
+		if !strings.Contains(stderr, "warning[opa/zero-rules]") {
+			t.Errorf("expected zero-rules warning with stable code, got: %q", stderr)
+		}
+		if !strings.Contains(stderr, "enforce NOTHING") {
+			t.Errorf("expected the loud 'enforce NOTHING' headline, got: %q", stderr)
+		}
+	})
+
+	t.Run("EmptyPack", func(t *testing.T) {
+		pack, stderr, loadErr := loadDirCapturingStderr(t, t.TempDir())
+
+		if loadErr != nil {
+			t.Fatalf("expected no error for an empty pack, got: %v", loadErr)
+		}
+		if len(pack.Policies) != 0 {
+			t.Fatalf("expected 0 policies, got %d", len(pack.Policies))
+		}
+		if !strings.Contains(stderr, "warning[opa/zero-rules]") {
+			t.Errorf("expected zero-rules warning for empty pack, got: %q", stderr)
+		}
+	})
+
+	t.Run("NotEmittedWhenRecognizedRuleExists", func(t *testing.T) {
+		rego := `
+package test
+
+deny[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+
+is_public {
+    input.acl == "public-read"
+}
+`
+		_, stderr := loadPolicyPackCapturingStderr(t, rego)
+
+		if strings.Contains(stderr, "opa/zero-rules") {
+			t.Errorf("did not expect zero-rules warning when a recognized rule exists, got: %q", stderr)
+		}
+	})
 }

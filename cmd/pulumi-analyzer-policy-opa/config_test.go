@@ -970,6 +970,9 @@ deny_size[msg] {
 			})
 		})
 
+		if !strings.Contains(stderr, "warning[opa/missing-config]") {
+			t.Errorf("expected stable diagnostic code, got: %q", stderr)
+		}
 		if !strings.Contains(stderr, "deny_size") {
 			t.Errorf("expected warning mentioning deny_size, got: %q", stderr)
 		}

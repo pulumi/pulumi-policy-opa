@@ -811,9 +811,19 @@ Rules can include a suffix for disambiguation (e.g. `deny_public_buckets`, `stac
 > **Common silent failure:** a misnamed rule simply doesn't run — no error, no violation.
 > `denyPublicBuckets` (camelCase), `denies_public` (typo), and `Deny_Public` (wrong case)
 > are all treated as helpers and skipped. When the analyzer detects a name that *looks* like
-> a mistyped rule, it prints a `warning:` to stderr naming the rule and how to fix it, but the
-> safest habit is to copy a working prefix exactly: `deny`, `deny_<name>`, `violation`,
-> `violation_<name>`, `warn`, `warn_<name>`, or the `stack_`-prefixed forms.
+> a mistyped rule it prints `warning[opa/unrecognized-rule]` to stderr naming the rule and how
+> to fix it; if **no** rule in the pack is recognized it prints `warning[opa/zero-rules]` (the
+> pack would enforce nothing). These `warning[opa/...]` codes are stable — grep for them in CI
+> to fail a build on misnamed policies. The safest habit is to copy a working prefix exactly.
+
+**Name rules exactly like the left column — anything else is silently skipped:**
+
+| ✅ Evaluated | ❌ Skipped (treated as a helper) | Why it's skipped |
+|---|---|---|
+| `deny_public_buckets[msg]` | `denyPublicBuckets[msg]` | camelCase instead of `snake_case` |
+| `violation_open_ports[msg]` | `Deny_Public[msg]` | wrong case (`Deny`, not `deny`) |
+| `warn_missing_tags[msg]` | `denies_public[msg]` | not a recognized keyword |
+| `stack_deny_too_many[msg]` | `require_https[msg]`, `must_have_tags[msg]` | correctly spelled, **wrong API** — use `deny`/`warn`, not synonyms like `require`/`must`/`ensure` |
 
 ```rego
 # METADATA
@@ -924,7 +934,7 @@ of the idioms above. See [Testing Your Policies](#testing-your-policies).
 
 ### Violations not shown
 
-1. Rule must use a recognized prefix: `deny`, `violation`, `warn`, `stack_deny`, `stack_violation`, or `stack_warn`. Prefixes are **case-sensitive** and use **underscores** (`deny_public`, not `denyPublic` or `Deny_Public`). A misnamed rule is silently treated as a helper and never runs — watch stderr for a `warning: rule ... will NOT be evaluated` message.
+1. Rule must use a recognized prefix: `deny`, `violation`, `warn`, `stack_deny`, `stack_violation`, or `stack_warn`. Prefixes are **case-sensitive** and use **underscores** (`deny_public`, not `denyPublic` or `Deny_Public`). A misnamed rule is silently treated as a helper and never runs — watch stderr for `warning[opa/unrecognized-rule]` (a single misnamed rule) or `warning[opa/zero-rules]` (the whole pack evaluates nothing). See [Rule Prefixes and Severity](#rule-prefixes-and-severity) for the ✅/❌ naming table.
 2. Check your Rego idioms — `not input.tags` does **not** mean "tags is empty"; use `count(input.tags) == 0`. See [Best Practices → Know the Rego Idioms That Bite](#5-know-the-rego-idioms-that-bite).
 3. Verify the input structure matches your resource type (properties are at the top level or under `input.properties`, never under `input.args`).
 4. Use `pulumi preview --policy-pack ./policies --debug` for verbose output

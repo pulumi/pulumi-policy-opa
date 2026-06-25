@@ -17,7 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+	"maps"
 	"strings"
 
 	"github.com/blang/semver"
@@ -190,8 +190,9 @@ func (a *analyzer) warnMissingConfig() {
 				continue
 			}
 		}
-		fmt.Fprintf(os.Stderr, "warning: policy %q declares a config schema but no configuration was provided; "+
-			"rules referencing data.config will not fire\n", pol.Name)
+		warnf(diagMissingConfig, "policy %q declares a config schema but no configuration was provided, so "+
+			"rules referencing data.config will not fire. Fix: provide configuration for %q in your policy "+
+			"pack config, or remove the config schema if it is unused.", pol.Name, pol.Name)
 	}
 }
 
@@ -322,9 +323,7 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 
 	// Overlay resource properties so they take precedence over metadata
 	// fields at the top level for backwards compatibility.
-	for k, v := range r.Properties.Mappable() {
-		obj[k] = v
-	}
+	maps.Copy(obj, propsBag)
 
 	// Set __-prefixed metadata fields last so they are always available as a
 	// collision-safe escape hatch, even if a resource property has the same name
@@ -411,9 +410,7 @@ func buildKubernetesAdmissionInput(
 
 	// Build the review object — start with the resource properties.
 	reviewObject := make(map[string]any, len(props)+2)
-	for k, v := range props {
-		reviewObject[k] = v
-	}
+	maps.Copy(reviewObject, props)
 
 	// Synthesize apiVersion and kind if not already present in properties.
 	if _, ok := reviewObject["apiVersion"]; !ok {
