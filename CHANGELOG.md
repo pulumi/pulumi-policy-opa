@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.1
+
 ### Improvements
 
 - **Unrecognized rule names now warn**: OPA rules with names that lack a recognized prefix
