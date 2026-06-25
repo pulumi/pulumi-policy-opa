@@ -5,7 +5,7 @@
 ### Improvements
 
 - **Unrecognized rule names now warn**: OPA rules with names that lack a recognized prefix
-  (`deny`, `violation`, `warn`, `stack_deny`, `stack_warn`) now emit a clear stderr warning
+  (`deny`, `violation`, `warn`, `stack_deny`, `stack_violation`, `stack_warn`) now emit a clear stderr warning
   explaining the rule won't be evaluated and how to rename it. Previously these were silently
   skipped. (#42)
 - **Empty policy packs now warn loudly**: a pack that would evaluate no rules at all — every

@@ -247,11 +247,8 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 		}
 	}
 
-	// A pack that evaluates no rules at all — every rule is a helper that matches no
-	// recognized prefix, or there are no rules — silently enforces nothing, which almost
-	// always indicates an authoring bug. Warn loudly (but don't fail to load) so it can't
-	// escape notice on a published pack while staying out of the way during incremental
-	// authoring.
+	// A pack that evaluates no rules silently enforces nothing — almost always an
+	// authoring bug. Warn loudly, but don't fail to load (see warnZeroRules).
 	if len(policies) == 0 {
 		warnZeroRules(packName, totalRules)
 	}
@@ -317,7 +314,7 @@ func warnZeroRules(packName string, totalRules int) {
 
 	const bar = "========================================================================"
 	fmt.Fprintf(os.Stderr, "%s\nwarning[%s]: %s will enforce NOTHING — %s. "+
-		"Fix: name at least one rule deny_/violation_/warn_ (resource) or "+
+		"Fix: name at least one rule deny/violation/warn (resource) or "+
 		"stack_deny/stack_violation/stack_warn (stack), e.g. \"deny_public_buckets\". "+
 		"Prefixes are case-sensitive and use underscores.\n%s\n",
 		bar, diagZeroRules, name, detail, bar)

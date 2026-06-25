@@ -316,7 +316,8 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	// can access them via input.properties.<key> without metadata key collisions.
 	// "props" is a backwards-compatible alias for the same bag: authors coming from
 	// the Node Policy SDK frequently reach for input.props by muscle memory, and a
-	// silent miss there produces a rule that never fires. Both point at the same map.
+	// silent miss there leaves an undefined reference — a rule that matches nothing, or
+	// everything if it sits under `not`. Both point at the same map.
 	propsBag := r.Properties.Mappable()
 	obj["properties"] = propsBag
 	obj["props"] = propsBag

@@ -305,7 +305,9 @@ input.bucketName       # e.g. "my-bucket"
 > Policy SDK exposes resource inputs as `args.props`, which trips up authors porting rules:
 > in OPA there is no `args` object. For convenience `input.props` is accepted as an alias for
 > `input.properties`, but prefer `input.<property>` or `input.properties.<property>` — a typo'd
-> path like `input.args.props.acl` is simply `undefined` and silently makes the rule never fire.
+> path like `input.args.props.acl` is simply `undefined`, and an undefined reference fails
+> silently in either direction: the rule matches **nothing**, or **everything** if the reference
+> sits under `not` (e.g. `not input.args.props.acl` is always true).
 
 ### Metadata Fields
 
@@ -501,7 +503,7 @@ Stack-level policies evaluate the entire set of resources in a stack, enabling c
 
 ### Writing Stack-Level Rules
 
-Use the `stack_deny` or `stack_warn` prefix. The input contains a `resources` array with all resources in the stack:
+Use the `stack_deny`, `stack_violation`, or `stack_warn` prefix. The input contains a `resources` array with all resources in the stack:
 
 ```rego
 package mypack
@@ -913,10 +915,10 @@ resources. These are the most common ways a policy "passes" without ever doing a
 
 | Goal | ✅ Do this | ❌ Not this | Why the wrong form fails silently |
 |------|-----------|------------|-----------------------------------|
-| "collection is empty / missing" | `count(input.tags) == 0` | `not input.tags` | `not input.tags` is only true when the key is **absent**. An empty list/object (`[]`, `{}`) is still "defined", so the rule fires on 0% of real resources. |
+| "collection is empty or missing" | `count(object.get(input, "tags", [])) == 0` | `not input.tags` or `count(input.tags) == 0` | `not input.tags` matches only a **missing** key (an empty `[]`/`{}` is still "defined"); `count(input.tags) == 0` matches only a **present-but-empty** value — it's `undefined` (so never matches) when the key is missing. `object.get(..., [])` supplies a default, covering both. |
 | "key exists" | `input.encryption` | `input.encryption == true` | A non-boolean (e.g. a config block) is truthy in `input.encryption` but `!= true`, so the equality form fires on 0%. |
 | "no element matches" | `count([x | x := input.rules[_]; bad(x)]) == 0` | `not input.rules[_]` | `not input.rules[_]` negates over the whole collection and rarely means what you expect. |
-| read a property | `input.acl` or `input.properties.acl` | `input.args.props.acl` | There is no `args` object (that's the Node SDK). The path is `undefined`, so the rule never fires. |
+| read a property | `input.acl` or `input.properties.acl` | `input.args.props.acl` | There is no `args` object (that's the Node SDK). The path is `undefined`, so the rule fires on 0% of resources — or 100% if the reference is under `not`. |
 
 When in doubt, run `opa eval` against a fixture you *know* should violate and confirm you
 get a result — a rule that returns nothing on a known-bad input is the tell-tale sign of one
@@ -935,7 +937,7 @@ of the idioms above. See [Testing Your Policies](#testing-your-policies).
 ### Violations not shown
 
 1. Rule must use a recognized prefix: `deny`, `violation`, `warn`, `stack_deny`, `stack_violation`, or `stack_warn`. Prefixes are **case-sensitive** and use **underscores** (`deny_public`, not `denyPublic` or `Deny_Public`). A misnamed rule is silently treated as a helper and never runs — watch stderr for `warning[opa/unrecognized-rule]` (a single misnamed rule) or `warning[opa/zero-rules]` (the whole pack evaluates nothing). See [Rule Prefixes and Severity](#rule-prefixes-and-severity) for the ✅/❌ naming table.
-2. Check your Rego idioms — `not input.tags` does **not** mean "tags is empty"; use `count(input.tags) == 0`. See [Best Practices → Know the Rego Idioms That Bite](#5-know-the-rego-idioms-that-bite).
+2. Check your Rego idioms — for "empty or missing", neither `not input.tags` (matches only a missing key) nor `count(input.tags) == 0` (`undefined`, so never matches, when the key is missing) is enough; use `count(object.get(input, "tags", [])) == 0`. See [Best Practices → Know the Rego Idioms That Bite](#5-know-the-rego-idioms-that-bite).
 3. Verify the input structure matches your resource type (properties are at the top level or under `input.properties`, never under `input.args`).
 4. Use `pulumi preview --policy-pack ./policies --debug` for verbose output
 
