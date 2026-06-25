@@ -920,7 +920,11 @@ func captureStderr(t *testing.T, fn func()) string {
 	_ = w.Close()
 	os.Stderr = origStderr
 
-	out, _ := io.ReadAll(r)
+	out, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatalf("failed to read captured stderr: %v", readErr)
+	}
+	_ = r.Close()
 	return string(out)
 }
 

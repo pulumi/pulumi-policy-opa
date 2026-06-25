@@ -335,8 +335,8 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	// survives a (highly unlikely) resource property named "__name".
 	obj["__name"] = r.Name
 	obj["__options"] = opts
-	obj["__properties"] = r.Properties.Mappable()
-	obj["__props"] = r.Properties.Mappable()
+	obj["__properties"] = propsBag
+	obj["__props"] = propsBag
 	obj["__provider"] = providerInfo
 
 	return obj

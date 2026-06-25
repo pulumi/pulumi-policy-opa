@@ -715,21 +715,7 @@ deny[msg] {
 	}
 
 	// Capture stderr to verify the duplicate warning is emitted.
-	origStderr := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
-	os.Stderr = w
-
-	pack, _, loadErr := loadPolicyPack(dir)
-
-	_ = w.Close()
-	os.Stderr = origStderr
-
-	stderrBytes, _ := io.ReadAll(r)
-	stderrOutput := string(stderrBytes)
-
+	pack, stderrOutput, loadErr := loadDirCapturingStderr(t, dir)
 	if loadErr != nil {
 		t.Fatalf("loadPolicyPack failed: %v", loadErr)
 	}
@@ -769,7 +755,11 @@ func loadDirCapturingStderr(t *testing.T, dir string) (*policyPack, string, erro
 	_ = w.Close()
 	os.Stderr = origStderr
 
-	stderrBytes, _ := io.ReadAll(r)
+	stderrBytes, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatalf("failed to read captured stderr: %v", readErr)
+	}
+	_ = r.Close()
 	return pack, string(stderrBytes), loadErr
 }
 
