@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 
 	"github.com/blang/semver"
 
@@ -34,10 +35,10 @@ var VersionString = "0.0.1+dev"
 
 // analyzer implements the Analyzer interface needed to plug into Pulumi as a policy analyzer.
 type analyzer struct {
-	pack          *policyPack
-	e             *evaler
-	policyConfig  map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
-	configChecked bool                                   // guards one-time missing-config warning
+	pack            *policyPack
+	e               *evaler
+	policyConfig    map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
+	configCheckOnce sync.Once                              // guards the one-time missing-config warning across concurrent Analyze calls
 }
 
 func NewAnalyzer(
@@ -176,24 +177,21 @@ func (a *analyzer) Configure(policyConfig map[string]plugin.AnalyzerPolicyConfig
 // schema but was not given any configuration properties. Without config, rules that
 // reference data.config will silently not fire.
 func (a *analyzer) warnMissingConfig() {
-	if a.configChecked {
-		return
-	}
-	a.configChecked = true
-
-	for _, pol := range a.pack.Policies {
-		if pol.ConfigSchema == nil {
-			continue
-		}
-		if a.policyConfig != nil {
-			if cfg, ok := a.policyConfig[pol.Name]; ok && len(cfg.Properties) > 0 {
+	a.configCheckOnce.Do(func() {
+		for _, pol := range a.pack.Policies {
+			if pol.ConfigSchema == nil {
 				continue
 			}
+			if a.policyConfig != nil {
+				if cfg, ok := a.policyConfig[pol.Name]; ok && len(cfg.Properties) > 0 {
+					continue
+				}
+			}
+			warnf(diagMissingConfig, "policy %q declares a config schema but no configuration was provided, so "+
+				"rules referencing data.config will not fire. Fix: provide configuration for %q in your policy "+
+				"pack config, or remove the config schema if it is unused.", pol.Name, pol.Name)
 		}
-		warnf(diagMissingConfig, "policy %q declares a config schema but no configuration was provided, so "+
-			"rules referencing data.config will not fire. Fix: provide configuration for %q in your policy "+
-			"pack config, or remove the config schema if it is unused.", pol.Name, pol.Name)
-	}
+	})
 }
 
 func (a *analyzer) Cancel(ctx context.Context) error {

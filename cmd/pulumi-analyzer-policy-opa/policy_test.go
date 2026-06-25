@@ -1013,6 +1013,33 @@ deny_public[msg] {
 	}
 }
 
+// TestLoadPolicies_NoWarnOnFunctionHelper verifies that a function (a rule with arguments)
+// is never flagged by the name heuristic, even when its name matches a rule-like keyword
+// like "check" — a deny/warn policy never takes arguments, so a function is unambiguously a
+// helper. This test captures os.Stderr so it must not run in parallel.
+func TestLoadPolicies_NoWarnOnFunctionHelper(t *testing.T) {
+	rego := `
+package test
+
+check(resource) {
+    resource.acl == "public-read"
+}
+
+deny_public[msg] {
+    check(input)
+    msg := "public ACL not allowed"
+}
+`
+	pack, stderrOutput := loadPolicyPackCapturingStderr(t, rego)
+
+	if findRule(pack, "deny_public") == nil {
+		t.Error("expected deny_public rule to be loaded")
+	}
+	if strings.Contains(stderrOutput, "will NOT be evaluated") {
+		t.Errorf("did not expect a warning for the function helper check(), got: %q", stderrOutput)
+	}
+}
+
 // TestLoadPolicies_ZeroRecognizedRules verifies that a policy pack which would evaluate
 // nothing — either because every rule is a helper that matches no recognized prefix, or
 // because the pack is empty — emits a loud, stable-coded warning, but still loads without

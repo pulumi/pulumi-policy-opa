@@ -165,6 +165,7 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 	var policies []*policyRule
 	totalRules := 0
 	existing := make(map[string]struct{})
+	warnedUnrecognized := make(map[string]struct{})
 	for name, module := range compiler.Modules {
 		// First determine the package name. This should match for all rules.
 		pkg := module.Package.String()
@@ -210,7 +211,12 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 				// or an imperative policy verb), warn loudly so the author gets a
 				// signal instead of a rule that silently never fires.
 				policyShaped := rule.Head.Key != nil && len(rule.Head.Args) == 0
-				warnUnrecognizedRule(ruleName, name, policyShaped)
+				isFunction := len(rule.Head.Args) > 0
+				if _, warned := warnedUnrecognized[ruleName]; !warned {
+					if warnUnrecognizedRule(ruleName, name, policyShaped, isFunction) {
+						warnedUnrecognized[ruleName] = struct{}{}
+					}
+				}
 				continue // skip
 			}
 
@@ -323,9 +329,11 @@ func warnZeroRules(packName string, totalRules int) {
 		bar, diagZeroRules, name, detail, bar)
 }
 
-// warnUnrecognizedRule emits a one-time stderr warning for a rule that does not match
-// a recognized prefix — so it is silently treated as a helper and never runs — but
-// looks like it was meant to be evaluated. There are two independent triggers:
+// warnUnrecognizedRule reports a rule that does not match a recognized prefix — so it is
+// silently treated as a helper and never runs — but looks like it was meant to be
+// evaluated. It returns true if it emitted a warning; the caller dedupes by rule name so
+// each name is reported at most once, even when defined across multiple bodies. There are
+// two independent triggers:
 //
 //   - policyShaped: the rule is a partial set/object rule that builds up a collection
 //     of messages (the deny/warn shape), which is the most robust signal that the
@@ -333,17 +341,16 @@ func warnZeroRules(packName string, totalRules int) {
 //   - its name matches ruleLikeNamePrefix — wrong casing, a near-miss spelling, or an
 //     imperative policy verb (require/must/ensure/check/...) that implies enforcement.
 //
-// The message names the rule, explains why it was flagged and why it won't run, shows
-// how to fix it, and notes that an intentional helper can be ignored or renamed so it
-// no longer looks rule-like. It mirrors the stderr style used by warnMissingConfig.
+// A function (a rule with arguments) is never reported by the name trigger, since a
+// deny/warn policy never takes arguments — so a helper like "check(x)" stays quiet.
 //
 // Rules that are neither policy-shaped nor rule-like by name (genuine boolean/value/
 // function helpers such as "is_public", "required_labels", "valid_cidr") are not
 // reported.
-func warnUnrecognizedRule(ruleName, module string, policyShaped bool) {
-	nameLooksRuleLike := ruleLikeNamePrefix.MatchString(ruleName)
+func warnUnrecognizedRule(ruleName, module string, policyShaped, isFunction bool) bool {
+	nameLooksRuleLike := !isFunction && ruleLikeNamePrefix.MatchString(ruleName)
 	if !policyShaped && !nameLooksRuleLike {
-		return
+		return false
 	}
 
 	var reason string
@@ -364,6 +371,7 @@ func warnUnrecognizedRule(ruleName, module string, policyShaped bool) {
 		"is a helper routine and not a policy, ignore this warning or rename it so it no longer looks "+
 		"rule-like.",
 		ruleName, module, reason)
+	return true
 }
 
 // policyPack holds the metadata for a complete Pulumi policy package.

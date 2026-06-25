@@ -846,7 +846,7 @@ deny_public_access[msg] {
 # custom:
 #   message: Add a loggings configuration block.
 warn_logging[msg] {
-    not input.loggings
+    count(object.get(input, "loggings", [])) == 0
     msg := "Consider enabling access logs"
 }
 
@@ -952,11 +952,12 @@ of the idioms above. See [Testing Your Policies](#testing-your-policies).
 
 ### Policy passes but shouldn't
 
-Add a temporary debug rule to inspect the input:
+Add a temporary advisory rule to inspect the input — the `warn_` prefix makes it actually
+evaluate, and `__type`/`__name` are collision-safe:
 
 ```rego
-debug_input[msg] {
-    msg := sprintf("Type: %s, Name: %s", [input.type, input.__name])
+warn_debug_input[msg] {
+    msg := sprintf("Type: %s, Name: %s", [input.__type, input.__name])
 }
 ```
 
