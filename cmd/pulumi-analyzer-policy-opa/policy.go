@@ -205,11 +205,10 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 			} else {
 				// This rule does not match any recognized prefix, so it will be
 				// treated as a library routine and never evaluated. If the rule has
-				// the shape of a policy (a partial set/object rule that builds up a
-				// collection of messages — Head.Key set, no function args) or its
-				// name looks like it was *meant* to be a rule (wrong casing, a typo,
-				// or an imperative policy verb), warn loudly so the author gets a
-				// signal instead of a rule that silently never fires.
+				// the shape of a policy (a partial set/object rule — Head.Key set, no
+				// function args) or its name looks like it was *meant* to be a rule
+				// (wrong casing, a typo, or an imperative policy verb), warn loudly so
+				// the author gets a signal instead of a rule that silently never fires.
 				policyShaped := rule.Head.Key != nil && len(rule.Head.Args) == 0
 				isFunction := len(rule.Head.Args) > 0
 				if _, warned := warnedUnrecognized[ruleName]; !warned {
@@ -335,9 +334,9 @@ func warnZeroRules(packName string, totalRules int) {
 // each name is reported at most once, even when defined across multiple bodies. There are
 // two independent triggers:
 //
-//   - policyShaped: the rule is a partial set/object rule that builds up a collection
-//     of messages (the deny/warn shape), which is the most robust signal that the
-//     author intended it as a policy regardless of what they named it; or
+//   - policyShaped: the rule is a partial set/object rule (a key, no args) — the same
+//     shape as a deny/warn rule — which is the most robust signal that the author
+//     intended it as a policy regardless of what they named it; or
 //   - its name matches ruleLikeNamePrefix — wrong casing, a near-miss spelling, or an
 //     imperative policy verb (require/must/ensure/check/...) that implies enforcement.
 //
@@ -356,9 +355,9 @@ func warnUnrecognizedRule(ruleName, module string, policyShaped, isFunction bool
 	var reason string
 	switch {
 	case policyShaped && nameLooksRuleLike:
-		reason = "it builds up a set of messages and its name implies intent to enforce a policy"
+		reason = "it has the partial set/object shape of a deny/warn rule and its name implies intent to enforce a policy"
 	case policyShaped:
-		reason = "it builds up a set of messages like a deny/warn rule"
+		reason = "it has the partial set/object shape of a deny/warn rule"
 	default:
 		reason = "its name implies intent to enforce a policy"
 	}

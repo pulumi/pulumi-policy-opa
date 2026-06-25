@@ -928,10 +928,9 @@ check_public[msg] {
 }
 
 // TestLoadPolicies_WarnsOnPolicyShapedRule verifies the primary, name-independent
-// trigger: a partial set rule that builds up a collection of messages (the deny/warn
-// shape) is flagged even when its name matches no keyword heuristic, because its shape
-// is the strongest signal the author meant it to be a policy. This test captures
-// os.Stderr so it must not run in parallel.
+// trigger: a partial set/object rule (the deny/warn shape) is flagged even when its name
+// matches no keyword heuristic, because its shape is the strongest signal the author meant
+// it to be a policy. This test captures os.Stderr so it must not run in parallel.
 func TestLoadPolicies_WarnsOnPolicyShapedRule(t *testing.T) {
 	rego := `
 package test
@@ -952,8 +951,8 @@ s3_bucket_policy[msg] {
 	if !strings.Contains(stderrOutput, "s3_bucket_policy") {
 		t.Errorf("expected warning to name the rule, got: %q", stderrOutput)
 	}
-	if !strings.Contains(stderrOutput, "set of messages") {
-		t.Errorf("expected warning to cite the set-producing shape, got: %q", stderrOutput)
+	if !strings.Contains(stderrOutput, "shape of a deny/warn rule") {
+		t.Errorf("expected warning to cite the deny/warn shape, got: %q", stderrOutput)
 	}
 }
 
