@@ -634,9 +634,8 @@ deny[msg] { msg := "fail" }
 }
 
 func TestAnalyzer_GetPluginInfo(t *testing.T) {
-	t.Parallel()
-
-	// Save and restore the global VersionString.
+	// NOT parallel: this test mutates the package-global VersionString (read by
+	// buildDiagnostics), so running it concurrently would race other tests.
 	origVersion := VersionString
 	t.Cleanup(func() { VersionString = origVersion })
 

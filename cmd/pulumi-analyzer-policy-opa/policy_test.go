@@ -715,21 +715,7 @@ deny[msg] {
 	}
 
 	// Capture stderr to verify the duplicate warning is emitted.
-	origStderr := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("failed to create pipe: %v", err)
-	}
-	os.Stderr = w
-
-	pack, _, loadErr := loadPolicyPack(dir)
-
-	_ = w.Close()
-	os.Stderr = origStderr
-
-	stderrBytes, _ := io.ReadAll(r)
-	stderrOutput := string(stderrBytes)
-
+	pack, stderrOutput, loadErr := loadDirCapturingStderr(t, dir)
 	if loadErr != nil {
 		t.Fatalf("loadPolicyPack failed: %v", loadErr)
 	}
@@ -746,7 +732,378 @@ deny[msg] {
 	}
 
 	// Verify that a warning was emitted for the duplicate rule.
-	if !strings.Contains(stderrOutput, "warning: duplicate rule") {
+	if !strings.Contains(stderrOutput, "warning[opa/duplicate-rule]") {
 		t.Errorf("expected duplicate rule warning on stderr, got: %q", stderrOutput)
 	}
+}
+
+// loadDirCapturingStderr loads a policy pack from dir while capturing everything written
+// to os.Stderr, returning the loaded pack, the captured output, and any load error. Because
+// it swaps os.Stderr it must not run in parallel.
+func loadDirCapturingStderr(t *testing.T, dir string) (*policyPack, string, error) {
+	t.Helper()
+
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+
+	pack, _, loadErr := loadPolicyPack(dir)
+
+	_ = w.Close()
+	os.Stderr = origStderr
+
+	stderrBytes, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatalf("failed to read captured stderr: %v", readErr)
+	}
+	_ = r.Close()
+	return pack, string(stderrBytes), loadErr
+}
+
+// loadPolicyPackCapturingStderr loads a policy pack from the given Rego source while
+// capturing everything written to os.Stderr, returning the captured output. It fails the
+// test if loading errors. Because it swaps os.Stderr it must not run in parallel.
+func loadPolicyPackCapturingStderr(t *testing.T, rego string) (*policyPack, string) {
+	t.Helper()
+	pack, out, loadErr := loadDirCapturingStderr(t, writeRegoFile(t, "policy.rego", rego))
+	if loadErr != nil {
+		t.Fatalf("loadPolicyPack failed: %v", loadErr)
+	}
+	return pack, out
+}
+
+// TestLoadPolicies_WarnsOnUnrecognizedRule verifies that rules whose names look like
+// they were intended to be evaluated rules — but use the wrong casing, a near-miss
+// spelling, or a bad separator — produce a loud stderr warning and are not evaluated.
+// These tests capture os.Stderr so they must not run in parallel.
+func TestLoadPolicies_WarnsOnUnrecognizedRule(t *testing.T) {
+	cases := []struct {
+		name     string
+		ruleName string
+		rego     string
+	}{
+		{
+			name:     "WrongCase",
+			ruleName: "denyPublicBuckets",
+			rego: `
+package test
+
+denyPublicBuckets[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
+		{
+			name:     "Misspelling",
+			ruleName: "denies_public",
+			rego: `
+package test
+
+denies_public[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
+		{
+			name:     "StackMisspelling",
+			ruleName: "stack_denies_public",
+			rego: `
+package test
+
+stack_denies_public[msg] {
+    r := input.resources[_]
+    r.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
+		{
+			name:     "StackWrongCase",
+			ruleName: "stackDeny",
+			rego: `
+package test
+
+stackDeny[msg] {
+    count(input.resources) > 10
+    msg := "too many resources"
+}
+`,
+		},
+		{
+			name:     "WarningTypo",
+			ruleName: "warning_no_tags",
+			rego: `
+package test
+
+warning_no_tags[msg] {
+    not input.tags
+    msg := "missing tags"
+}
+`,
+		},
+		{
+			// The owner's explicit example: an imperative policy verb with no
+			// recognized prefix. Caught by both the broadened name heuristic and the
+			// set-producing shape.
+			name:     "ImperativeRequire",
+			ruleName: "require_versioning",
+			rego: `
+package test
+
+require_versioning[msg] {
+    input.type == "aws:s3/bucket:Bucket"
+    not input.versioning.enabled
+    msg := "versioning must be enabled"
+}
+`,
+		},
+		{
+			name:     "ImperativeMust",
+			ruleName: "must_have_tags",
+			rego: `
+package test
+
+must_have_tags[msg] {
+    not input.tags
+    msg := "resources must have tags"
+}
+`,
+		},
+		{
+			name:     "ImperativeEnsure",
+			ruleName: "ensure_https",
+			rego: `
+package test
+
+ensure_https[msg] {
+    input.protocol != "https"
+    msg := "https must be used"
+}
+`,
+		},
+		{
+			name:     "ImperativeCheck",
+			ruleName: "check_public",
+			rego: `
+package test
+
+check_public[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pack, stderrOutput := loadPolicyPackCapturingStderr(t, tc.rego)
+
+			// The rule must not have been loaded as an evaluated policy.
+			if r := findRule(pack, tc.ruleName); r != nil {
+				t.Errorf("expected rule %q to be skipped, but it was loaded", tc.ruleName)
+			}
+
+			// A warning naming the rule and explaining the fix must be emitted, tagged with
+			// the stable diagnostic code.
+			if !strings.Contains(stderrOutput, "warning[opa/unrecognized-rule]") {
+				t.Errorf("expected stable diagnostic code, got: %q", stderrOutput)
+			}
+			if !strings.Contains(stderrOutput, "will NOT be evaluated") {
+				t.Errorf("expected unrecognized-rule warning, got: %q", stderrOutput)
+			}
+			if !strings.Contains(stderrOutput, tc.ruleName) {
+				t.Errorf("expected warning to name the rule %q, got: %q", tc.ruleName, stderrOutput)
+			}
+			if !strings.Contains(stderrOutput, "Fix: rename") {
+				t.Errorf("expected warning to explain the fix, got: %q", stderrOutput)
+			}
+		})
+	}
+}
+
+// TestLoadPolicies_WarnsOnPolicyShapedRule verifies the primary, name-independent
+// trigger: a partial set/object rule (the deny/warn shape) is flagged even when its name
+// matches no keyword heuristic, because its shape is the strongest signal the author meant
+// it to be a policy. This test captures os.Stderr so it must not run in parallel.
+func TestLoadPolicies_WarnsOnPolicyShapedRule(t *testing.T) {
+	rego := `
+package test
+
+s3_bucket_policy[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+`
+	pack, stderrOutput := loadPolicyPackCapturingStderr(t, rego)
+
+	if findRule(pack, "s3_bucket_policy") != nil {
+		t.Error("expected policy-shaped but unprefixed rule to be skipped, but it was loaded")
+	}
+	if !strings.Contains(stderrOutput, "will NOT be evaluated") {
+		t.Errorf("expected warning for policy-shaped rule, got: %q", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "s3_bucket_policy") {
+		t.Errorf("expected warning to name the rule, got: %q", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "shape of a deny/warn rule") {
+		t.Errorf("expected warning to cite the deny/warn shape, got: %q", stderrOutput)
+	}
+}
+
+// TestLoadPolicies_NoWarnOnLegitimateHelpers verifies that genuine helper routines —
+// boolean rules, value rules, and functions whose names do not look like a mistyped
+// rule — are silently treated as library routines without triggering the
+// unrecognized-rule warning. These are distinguished from policies by shape: a real
+// policy is a partial set/object rule (Head.Key set, no args), whereas helpers are
+// booleans, values, or functions. This test captures os.Stderr so it must not run in
+// parallel.
+func TestLoadPolicies_NoWarnOnLegitimateHelpers(t *testing.T) {
+	rego := `
+package test
+
+is_public {
+    input.acl == "public-read"
+}
+
+is_exempt {
+    input.tags.exempt == "true"
+}
+
+has_encryption {
+    input.serverSideEncryptionConfiguration
+}
+
+required_labels = ["env", "owner"]
+
+valid_cidr(cidr) {
+    cidr != "0.0.0.0/0"
+}
+
+deny_public[msg] {
+    is_public
+    not is_exempt
+    msg := "public ACL not allowed"
+}
+`
+	pack, stderrOutput := loadPolicyPackCapturingStderr(t, rego)
+
+	// The real rule should still load with no warning.
+	if findRule(pack, "deny_public") == nil {
+		t.Error("expected deny_public rule to be loaded")
+	}
+
+	// None of the helpers should be loaded as evaluated rules; they remain usable as
+	// library routines (deny_public above references is_public/is_exempt and compiles).
+	for _, helper := range []string{"is_public", "is_exempt", "has_encryption", "required_labels", "valid_cidr"} {
+		if findRule(pack, helper) != nil {
+			t.Errorf("helper %q should not be loaded as a policy", helper)
+		}
+	}
+
+	// No unrecognized-rule warning should have been emitted for any helper.
+	if strings.Contains(stderrOutput, "will NOT be evaluated") {
+		t.Errorf("did not expect unrecognized-rule warning for helpers, got: %q", stderrOutput)
+	}
+}
+
+// TestLoadPolicies_NoWarnOnFunctionHelper verifies that a function (a rule with arguments)
+// is never flagged by the name heuristic, even when its name matches a rule-like keyword
+// like "check" — a deny/warn policy never takes arguments, so a function is unambiguously a
+// helper. This test captures os.Stderr so it must not run in parallel.
+func TestLoadPolicies_NoWarnOnFunctionHelper(t *testing.T) {
+	rego := `
+package test
+
+check(resource) {
+    resource.acl == "public-read"
+}
+
+deny_public[msg] {
+    check(input)
+    msg := "public ACL not allowed"
+}
+`
+	pack, stderrOutput := loadPolicyPackCapturingStderr(t, rego)
+
+	if findRule(pack, "deny_public") == nil {
+		t.Error("expected deny_public rule to be loaded")
+	}
+	if strings.Contains(stderrOutput, "will NOT be evaluated") {
+		t.Errorf("did not expect a warning for the function helper check(), got: %q", stderrOutput)
+	}
+}
+
+// TestLoadPolicies_ZeroRecognizedRules verifies that a policy pack which would evaluate
+// nothing — either because every rule is a helper that matches no recognized prefix, or
+// because the pack is empty — emits a loud, stable-coded warning, but still loads without
+// error. A pack that enforces nothing is almost always an authoring bug. These tests
+// capture os.Stderr so they must not run in parallel.
+func TestLoadPolicies_ZeroRecognizedRules(t *testing.T) {
+	t.Run("OnlyHelpers", func(t *testing.T) {
+		// Genuine helpers (a boolean and a function) — neither is policy-shaped nor
+		// rule-like by name, so they produce no per-rule warning, leaving the pack-level
+		// zero-rules banner as the only signal.
+		rego := `
+package test
+
+is_public {
+    input.acl == "public-read"
+}
+
+valid_cidr(cidr) {
+    cidr != "0.0.0.0/0"
+}
+`
+		pack, stderr := loadPolicyPackCapturingStderr(t, rego)
+
+		if len(pack.Policies) != 0 {
+			t.Fatalf("expected 0 evaluable policies, got %d", len(pack.Policies))
+		}
+		if !strings.Contains(stderr, "warning[opa/zero-rules]") {
+			t.Errorf("expected zero-rules warning with stable code, got: %q", stderr)
+		}
+		if !strings.Contains(stderr, "enforce NOTHING") {
+			t.Errorf("expected the loud 'enforce NOTHING' headline, got: %q", stderr)
+		}
+	})
+
+	t.Run("EmptyPack", func(t *testing.T) {
+		pack, stderr, loadErr := loadDirCapturingStderr(t, t.TempDir())
+
+		if loadErr != nil {
+			t.Fatalf("expected no error for an empty pack, got: %v", loadErr)
+		}
+		if len(pack.Policies) != 0 {
+			t.Fatalf("expected 0 policies, got %d", len(pack.Policies))
+		}
+		if !strings.Contains(stderr, "warning[opa/zero-rules]") {
+			t.Errorf("expected zero-rules warning for empty pack, got: %q", stderr)
+		}
+	})
+
+	t.Run("NotEmittedWhenRecognizedRuleExists", func(t *testing.T) {
+		rego := `
+package test
+
+deny[msg] {
+    input.acl == "public-read"
+    msg := "public ACL not allowed"
+}
+
+is_public {
+    input.acl == "public-read"
+}
+`
+		_, stderr := loadPolicyPackCapturingStderr(t, rego)
+
+		if strings.Contains(stderr, "opa/zero-rules") {
+			t.Errorf("did not expect zero-rules warning when a recognized rule exists, got: %q", stderr)
+		}
+	})
 }

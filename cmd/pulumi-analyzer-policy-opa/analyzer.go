@@ -17,8 +17,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+	"maps"
 	"strings"
+	"sync"
 
 	"github.com/blang/semver"
 
@@ -34,10 +35,10 @@ var VersionString = "0.0.1+dev"
 
 // analyzer implements the Analyzer interface needed to plug into Pulumi as a policy analyzer.
 type analyzer struct {
-	pack          *policyPack
-	e             *evaler
-	policyConfig  map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
-	configChecked bool                                   // guards one-time missing-config warning
+	pack            *policyPack
+	e               *evaler
+	policyConfig    map[string]plugin.AnalyzerPolicyConfig // stored by Configure()
+	configCheckOnce sync.Once                              // guards the one-time missing-config warning across concurrent Analyze calls
 }
 
 func NewAnalyzer(
@@ -176,23 +177,21 @@ func (a *analyzer) Configure(policyConfig map[string]plugin.AnalyzerPolicyConfig
 // schema but was not given any configuration properties. Without config, rules that
 // reference data.config will silently not fire.
 func (a *analyzer) warnMissingConfig() {
-	if a.configChecked {
-		return
-	}
-	a.configChecked = true
-
-	for _, pol := range a.pack.Policies {
-		if pol.ConfigSchema == nil {
-			continue
-		}
-		if a.policyConfig != nil {
-			if cfg, ok := a.policyConfig[pol.Name]; ok && len(cfg.Properties) > 0 {
+	a.configCheckOnce.Do(func() {
+		for _, pol := range a.pack.Policies {
+			if pol.ConfigSchema == nil {
 				continue
 			}
+			if a.policyConfig != nil {
+				if cfg, ok := a.policyConfig[pol.Name]; ok && len(cfg.Properties) > 0 {
+					continue
+				}
+			}
+			warnf(diagMissingConfig, "policy %q declares a config schema but no configuration was provided, so "+
+				"rules referencing data.config will not fire. Fix: provide configuration for %q in your policy "+
+				"pack config, or remove the config schema if it is unused.", pol.Name, pol.Name)
 		}
-		fmt.Fprintf(os.Stderr, "warning: policy %q declares a config schema but no configuration was provided; "+
-			"rules referencing data.config will not fire\n", pol.Name)
-	}
+	})
 }
 
 func (a *analyzer) Cancel(ctx context.Context) error {
@@ -293,8 +292,9 @@ func buildProviderMap(r plugin.AnalyzerResource) map[string]any {
 //
 // If a resource property has the same key as a metadata field, the resource property
 // takes precedence for backwards compatibility. Policy authors can use the __-prefixed
-// versions (__type, __urn, __name, __options, __provider, __properties) to reliably
-// access metadata regardless of property name collisions.
+// versions (__type, __urn, __name, __options, __provider, __properties/__props) to
+// reliably access metadata regardless of property name collisions. The "props" key is
+// a backwards-compatible alias for "properties".
 func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	obj := make(map[string]any)
 
@@ -312,13 +312,17 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 
 	// Expose the properties as a nested "properties" bag so that policies
 	// can access them via input.properties.<key> without metadata key collisions.
-	obj["properties"] = r.Properties.Mappable()
+	// "props" is a backwards-compatible alias for the same bag: authors coming from
+	// the Node Policy SDK frequently reach for input.props by muscle memory, and a
+	// silent miss there leaves an undefined reference — a rule that matches nothing, or
+	// everything if it sits under `not`. Both point at the same map.
+	propsBag := r.Properties.Mappable()
+	obj["properties"] = propsBag
+	obj["props"] = propsBag
 
 	// Overlay resource properties so they take precedence over metadata
 	// fields at the top level for backwards compatibility.
-	for k, v := range r.Properties.Mappable() {
-		obj[k] = v
-	}
+	maps.Copy(obj, propsBag)
 
 	// Set __-prefixed metadata fields last so they are always available as a
 	// collision-safe escape hatch, even if a resource property has the same name
@@ -329,7 +333,8 @@ func buildOPAInput(r plugin.AnalyzerResource) map[string]any {
 	// survives a (highly unlikely) resource property named "__name".
 	obj["__name"] = r.Name
 	obj["__options"] = opts
-	obj["__properties"] = r.Properties.Mappable()
+	obj["__properties"] = propsBag
+	obj["__props"] = propsBag
 	obj["__provider"] = providerInfo
 
 	return obj
@@ -404,9 +409,7 @@ func buildKubernetesAdmissionInput(
 
 	// Build the review object — start with the resource properties.
 	reviewObject := make(map[string]any, len(props)+2)
-	for k, v := range props {
-		reviewObject[k] = v
-	}
+	maps.Copy(reviewObject, props)
 
 	// Synthesize apiVersion and kind if not already present in properties.
 	if _, ok := reviewObject["apiVersion"]; !ok {

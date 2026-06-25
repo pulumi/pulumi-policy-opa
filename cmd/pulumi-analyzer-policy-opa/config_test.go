@@ -920,7 +920,11 @@ func captureStderr(t *testing.T, fn func()) string {
 	_ = w.Close()
 	os.Stderr = origStderr
 
-	out, _ := io.ReadAll(r)
+	out, readErr := io.ReadAll(r)
+	if readErr != nil {
+		t.Fatalf("failed to read captured stderr: %v", readErr)
+	}
+	_ = r.Close()
 	return string(out)
 }
 
@@ -970,6 +974,9 @@ deny_size[msg] {
 			})
 		})
 
+		if !strings.Contains(stderr, "warning[opa/missing-config]") {
+			t.Errorf("expected stable diagnostic code, got: %q", stderr)
+		}
 		if !strings.Contains(stderr, "deny_size") {
 			t.Errorf("expected warning mentioning deny_size, got: %q", stderr)
 		}
