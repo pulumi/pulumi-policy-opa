@@ -1,2 +1,3 @@
 description: AWS Security Policies with configuration and stack-level rules
 runtime: opa
+version: 1.0.0

@@ -36,6 +36,7 @@ const InputFormatKubernetesAdmission = "kubernetes-admission"
 type policyPackManifest struct {
 	Description string `yaml:"description"`
 	Runtime     string `yaml:"runtime"`
+	Version     string `yaml:"version"`
 	InputFormat string `yaml:"inputFormat"`
 }
 
@@ -92,6 +93,7 @@ const (
 	diagZeroRules        = "opa/zero-rules"
 	diagDuplicateRule    = "opa/duplicate-rule"
 	diagMissingConfig    = "opa/missing-config"
+	diagMissingVersion   = "opa/missing-version"
 )
 
 // warnf writes a single authoring-time warning to stderr, tagged with a stable diagnostic
@@ -113,6 +115,9 @@ func loadPolicyPack(dir string) (*policyPack, *evaler, error) {
 			return nil, nil, errors.Errorf(
 				"unsupported inputFormat %q in %s (valid values: %q)",
 				manifest.InputFormat, manifestPath, InputFormatKubernetesAdmission)
+		}
+		if manifest.Version == "" {
+			warnMissingVersion(manifestPath)
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, nil, errors.Wrapf(err, "reading %s", manifestPath)
@@ -452,4 +457,13 @@ func loadConfigSchemas(dir string) map[string]*plugin.AnalyzerPolicyConfigSchema
 		}
 	}
 	return schemas
+}
+
+// warnMissingVersion flags a PulumiPolicy.yaml without `version:`. The CLI takes the pack
+// version from there, and without it a Cloud-enforced pack's violations can't be matched to
+// the version the service assigned on publish, so the policy summary splits into two rows.
+func warnMissingVersion(manifestPath string) {
+	warnf(diagMissingVersion, "%s has no `version`, so this pack's violations won't carry a version and "+
+		"Pulumi Cloud can't attribute them to a published version. Fix: add e.g. `version: 1.0.0` and "+
+		"bump it on every `pulumi policy publish`.", manifestPath)
 }

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Improvements
+
+- **`opa` language plugin**: releases now also ship `pulumi-language-opa`, a thin Pulumi language runtime
+  for `runtime: opa` policy packs. It is the analyzer binary under a second name: its `RunPlugin` re-execs
+  itself as the analyzer, so the CLI can run OPA packs through its standard language-plugin path instead of
+  the legacy `pulumi-analyzer-policy-<runtime>` fallback. Install it with `pulumi plugin install language opa`.
+
+### Bug Fixes
+
+- **Policy pack shown twice in the policy summary**: violations reported the analyzer's own build version as the
+  pack version, while the pack info reported none, so the CLI listed a pack without `version:` twice. The pack version
+  now comes only from `version:` in `PulumiPolicy.yaml`, and a new `warning[opa/missing-version]` flags packs
+  without one.
+
 ## v1.1.1
 
 ### Improvements

@@ -1107,3 +1107,41 @@ is_public {
 		}
 	})
 }
+
+func TestLoadPolicyPack_WarnsOnMissingVersion(t *testing.T) {
+	// Not parallel: captureStderr swaps the global os.Stderr.
+	for _, tc := range []struct {
+		manifest string
+		wantWarn bool
+	}{
+		{"runtime: opa\n", true},
+		{"runtime: opa\nversion: 1.0.0\n", false},
+	} {
+		dir := writeRegoFile(t, "p.rego", "package p\n\ndeny[msg] {\n    msg := \"x\"\n}\n")
+		if err := os.WriteFile(filepath.Join(dir, "PulumiPolicy.yaml"), []byte(tc.manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stderr := captureStderr(t, func() {
+			if _, _, err := loadPolicyPack(dir); err != nil {
+				t.Fatal(err)
+			}
+		})
+		if got := strings.Contains(stderr, "warning[opa/missing-version]"); got != tc.wantWarn {
+			t.Errorf("manifest %q: missing-version warning = %v, want %v; stderr:\n%s", tc.manifest, got, tc.wantWarn, stderr)
+		}
+	}
+}
+
+// TestExamplePolicyPacksLoad keeps the packs under examples/ compiling; nothing else exercises them.
+func TestExamplePolicyPacksLoad(t *testing.T) {
+	t.Parallel()
+	dirs, err := filepath.Glob("../../examples/policy-*")
+	if err != nil || len(dirs) == 0 {
+		t.Fatalf("no example policy packs found: %v", err)
+	}
+	for _, dir := range dirs {
+		if _, _, err := loadPolicyPack(dir); err != nil {
+			t.Errorf("%s: %v", dir, err)
+		}
+	}
+}

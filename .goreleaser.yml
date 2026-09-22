@@ -3,7 +3,11 @@ before:
   hooks:
     - go mod download
 builds:
-- env:
+# The same binary ships under two names: the legacy analyzer plugin (for older CLIs), and the
+# language plugin whose RunPlugin re-execs itself as the analyzer.
+- &build
+  id: analyzer
+  env:
   - CGO_ENABLED=0
   goos:
     - darwin
@@ -16,14 +20,24 @@ builds:
   main: ./cmd/pulumi-analyzer-policy-opa/
   ldflags:
     - -X main.VersionString={{.Version}}
+- <<: *build
+  id: language
+  binary: pulumi-language-opa
 archives:
 - id: archive
+  ids:
+  - analyzer
+  name_template: "{{ .Binary }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
+- id: language-archive
+  ids:
+  - language
   name_template: "{{ .Binary }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
 blobs:
 - bucket: get.pulumi.com
   directory: releases/plugins/
   ids:
   - archive
+  - language-archive
   provider: s3
   region: us-west-2
 snapshot:

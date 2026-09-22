@@ -1,2 +1,3 @@
 description: A minimal Policy Pack for Kubernetes using OPA.
 runtime: opa
+version: 1.0.0

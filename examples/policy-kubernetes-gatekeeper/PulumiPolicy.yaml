@@ -1,3 +1,4 @@
 description: Kubernetes Gatekeeper Policy Pack — reuses OPA Gatekeeper constraint templates.
 runtime: opa
+version: 1.0.0
 inputFormat: kubernetes-admission
