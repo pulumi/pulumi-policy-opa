@@ -436,7 +436,7 @@ violation contains {"msg": msg} if {
 
 ### Using `input.parameters`
 
-Gatekeeper Constraint parameters map to `input.parameters`. Configure them via the standard Pulumi policy configuration — each rule's `properties` are injected as `input.parameters` before evaluation:
+Gatekeeper Constraint parameters map to `input.parameters`. Configure them via the standard Pulumi policy configuration — each rule's configuration values (every key except `enforcementLevel`) are injected as `input.parameters` before evaluation:
 
 **Policy** (`replica-limits.rego`):
 ```rego
@@ -455,9 +455,7 @@ violation contains {"msg": msg} if {
 ```json
 {
     "violation": {
-        "properties": {
-            "maxReplicas": 5
-        }
+        "maxReplicas": 5
     }
 }
 ```
@@ -620,12 +618,12 @@ deny_large_instances[msg] {
 ```json
 {
     "deny_large_instances": {
-        "properties": {
-            "maxInstanceSize": "t3.medium"
-        }
+        "maxInstanceSize": "t3.medium"
     }
 }
 ```
+
+Put each rule's values directly under the rule name. Don't wrap them in a `"properties"` object: the analyzer passes a rule's configuration through as-is (minus `enforcementLevel`), so a wrapper would land the value at `data.config.deny_large_instances.properties.maxInstanceSize` and the rule above would never fire.
 
 ### Config Schema
 
