@@ -9,9 +9,12 @@ LDFLAGS          := -ldflags "-X main.VersionString=$(VERSION)"
 
 build::
 	go build $(LDFLAGS) ${PROJECT}
+	go build $(LDFLAGS) -o pulumi-language-opa ${PROJECT}
 
+# The same binary doubles as the `opa` language plugin.
 install::
 	go install $(LDFLAGS) ${PROJECT}
+	go build $(LDFLAGS) -o $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)/pulumi-language-opa ${PROJECT}
 
 lint::
 	golangci-lint run

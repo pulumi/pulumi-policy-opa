@@ -3,6 +3,8 @@
 # scope: package
 package aws
 
+import future.keywords.in
+
 # ---- Resource-level policies ----
 
 # METADATA

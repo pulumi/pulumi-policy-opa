@@ -66,6 +66,14 @@ pulumi preview --policy-pack ./policies
 
 The OPA analyzer plugin is installed automatically when you first run a policy pack with `runtime: opa`.
 
+To run OPA packs through the `opa` language plugin (the same way Node.js and Python packs run) instead, install it:
+
+```bash
+pulumi plugin install language opa
+```
+
+When it is installed, the CLI uses it. Otherwise the CLI falls back to the analyzer plugin. Both evaluate policies identically.
+
 ---
 
 ## Quick Start
@@ -81,6 +89,7 @@ Create `PulumiPolicy.yaml`:
 ```yaml
 description: My Security Policies
 runtime: opa
+version: 1.0.0
 # Optional: set inputFormat to "kubernetes-admission" for Gatekeeper-compatible rules.
 # See "Kubernetes Admission Controller Compatibility" below.
 ```
@@ -134,6 +143,8 @@ pulumi up --policy-pack /path/to/my-policies
 ```rego
 package aws
 
+import future.keywords.in
+
 # METADATA
 # title: No SSH from Anywhere
 # description: Security groups must not allow SSH (port 22) from 0.0.0.0/0.
@@ -169,6 +180,8 @@ deny_open_rdp[msg] {
 
 ```rego
 package kubernetes
+
+import future.keywords.in
 
 # METADATA
 # title: No Privileged Containers
@@ -416,6 +429,7 @@ Set `inputFormat` in your `PulumiPolicy.yaml`:
 ```yaml
 description: Kubernetes Gatekeeper Policy Pack
 runtime: opa
+version: 1.0.0
 inputFormat: kubernetes-admission
 ```
 
@@ -654,11 +668,12 @@ Pulumi validates the configuration against this schema before evaluation. If a r
 Use OPA's `# METADATA` annotation blocks to provide rich metadata for your policies. The analyzer extracts `title`, `description`, and `custom.message` from annotations and reports them to Pulumi.
 
 ```rego
-package aws
-
 # METADATA
 # title: S3 Public Access Policy
 # scope: package
+package aws
+
+import future.keywords.in
 
 # METADATA
 # title: No Public S3 Buckets
@@ -787,6 +802,7 @@ my-policies/
 |-------|----------|-------------|
 | `description` | No | Human-readable description of the policy pack |
 | `runtime` | Yes | Must be `opa` |
+| `version` | Recommended | Policy pack version, reported with every violation and used as the version tag by `pulumi policy publish`. Bump it on each publish. Without it the analyzer warns `warning[opa/missing-version]`, and violations from a pack enforced by Pulumi Cloud can't be matched to its published version. |
 | `inputFormat` | No | Set to `kubernetes-admission` for [Gatekeeper-compatible rules](#kubernetes-admission-controller-compatibility) |
 
 ### Package Naming
@@ -894,15 +910,16 @@ is_workload {
     input.kind == "DaemonSet"
 }
 
+# Use helper in policies
 # METADATA
 # title: Workload Security Policy
 # description: Workloads must meet security requirements.
 # custom:
 #   message: Review the workload's security configuration.
-# Use helper in policies
 deny_workload_security[msg] {
     is_workload
-    # policy logic
+    # ... policy logic ...
+    msg := sprintf("Workload '%s' fails security requirements", [input.metadata.name])
 }
 ```
 

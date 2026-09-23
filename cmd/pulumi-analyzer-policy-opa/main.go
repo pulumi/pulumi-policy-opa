@@ -23,6 +23,15 @@ import (
 func main() {
 	args := os.Args[1:]
 
+	// Launched as `pulumi-language-opa <engineAddr>`: serve the language runtime, whose
+	// RunPlugin re-execs this binary with [engineAddr, packDir] to run the analyzer below.
+	if len(args) == 1 {
+		if err := serveLanguageHost(); err != nil {
+			cmdutil.ExitError(err.Error())
+		}
+		return
+	}
+
 	if len(args) < 2 {
 		cmdutil.ExitError("missing required arguments: host and policy pack directory path")
 	}

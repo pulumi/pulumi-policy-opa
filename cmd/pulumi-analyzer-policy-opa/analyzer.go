@@ -139,6 +139,9 @@ func (a *analyzer) GetAnalyzerInfo() (plugin.AnalyzerInfo, error) {
 			ConfigSchema:     pol.ConfigSchema,
 		})
 	}
+	// No Version: the pack version comes from `version:` in PulumiPolicy.yaml, which the CLI applies to
+	// both this info and every diagnostic. Reporting the plugin build version here would become the
+	// published version tag (see warnMissingVersion).
 	return plugin.AnalyzerInfo{
 		Name:           a.pack.Name,
 		DisplayName:    a.pack.DisplayName,
@@ -231,12 +234,11 @@ func buildDiagnostics(
 		}
 
 		diagnostics = append(diagnostics, plugin.AnalyzeDiagnostic{
-			PolicyName:        result.rule,
-			PolicyPackName:    result.pack,
-			PolicyPackVersion: VersionString,
-			Message:           result.msg,
-			URN:               urn,
-			EnforcementLevel:  level,
+			PolicyName:       result.rule,
+			PolicyPackName:   result.pack,
+			Message:          result.msg,
+			URN:              urn,
+			EnforcementLevel: level,
 		})
 	}
 	return diagnostics

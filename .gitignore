@@ -3,3 +3,4 @@ dist/
 plans/
 /pulumi-analyzer-policy-opa
 /cmd/pulumi-analyzer-policy-opa/pulumi-analyzer-policy-opa
+/pulumi-language-opa
