@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.2
+
 ### Improvements
 
 - **`opa` language plugin**: releases now also ship `pulumi-language-opa`, a thin Pulumi language runtime
