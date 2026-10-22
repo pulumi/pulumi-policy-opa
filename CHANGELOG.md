@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.3
+
 ### Bug Fixes
 
 - **`config-schema.json` crashed the analyzer**: any pack with a config schema panicked in `GetAnalyzerInfo`
