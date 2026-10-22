@@ -53,7 +53,7 @@ deny contains msg if {
 		a := NewAnalyzer(pack, e)
 
 		// Production resource without protect — should produce a violation.
-		resp, err := a.Analyze(plugin.AnalyzerResource{
+		resp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:production::my-project::aws:s3/bucket:Bucket::prod-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "prod-bucket",
@@ -79,7 +79,7 @@ deny contains msg if {
 		}
 
 		// Production resource with protect — should pass cleanly.
-		resp, err = a.Analyze(plugin.AnalyzerResource{
+		resp, err = a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:production::my-project::aws:s3/bucket:Bucket::prod-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "prod-bucket",
@@ -99,7 +99,7 @@ deny contains msg if {
 		}
 
 		// Staging resource without protect — should pass (no "production" in URN).
-		resp, err = a.Analyze(plugin.AnalyzerResource{
+		resp, err = a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:staging::my-project::aws:s3/bucket:Bucket::staging-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "staging-bucket",
@@ -142,7 +142,7 @@ deny contains msg if {
 		a := NewAnalyzer(pack, e)
 
 		// Public bucket — should violate.
-		resp, err := a.Analyze(plugin.AnalyzerResource{
+		resp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:dev::proj::aws:s3/bucket:Bucket::bad-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "bad-bucket",
@@ -161,7 +161,7 @@ deny contains msg if {
 		}
 
 		// Private bucket — should pass.
-		resp, err = a.Analyze(plugin.AnalyzerResource{
+		resp, err = a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:dev::proj::aws:s3/bucket:Bucket::good-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "good-bucket",
@@ -197,7 +197,7 @@ deny[msg] {
 		a := NewAnalyzer(pack, e)
 
 		// Public bucket — should violate.
-		resp, err := a.Analyze(plugin.AnalyzerResource{
+		resp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:dev::proj::aws:s3/bucket:Bucket::bad-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "bad-bucket",
@@ -216,7 +216,7 @@ deny[msg] {
 		}
 
 		// Private bucket — should pass.
-		resp, err = a.Analyze(plugin.AnalyzerResource{
+		resp, err = a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:dev::proj::aws:s3/bucket:Bucket::good-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "good-bucket",
@@ -250,7 +250,7 @@ stack_deny[msg] {
 
 		a := NewAnalyzer(pack, e)
 
-		resp, err := a.Analyze(plugin.AnalyzerResource{
+		resp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "bucket",
@@ -364,7 +364,7 @@ stack_deny[msg] {
 				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-3"),
 		}
 
-		resp, err := a.AnalyzeStack(resources)
+		resp, err := a.AnalyzeStack(t.Context(), resources)
 		if err != nil {
 			t.Fatalf("AnalyzeStack returned error: %v", err)
 		}
@@ -406,7 +406,7 @@ stack_deny[msg] {
 				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
 		}
 
-		resp, err := a.AnalyzeStack(resources)
+		resp, err := a.AnalyzeStack(t.Context(), resources)
 		if err != nil {
 			t.Fatalf("AnalyzeStack returned error: %v", err)
 		}
@@ -439,7 +439,7 @@ deny[msg] {
 				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
 		}
 
-		resp, err := a.AnalyzeStack(resources)
+		resp, err := a.AnalyzeStack(t.Context(), resources)
 		if err != nil {
 			t.Fatalf("AnalyzeStack returned error: %v", err)
 		}
@@ -474,7 +474,7 @@ stack_deny[msg] {
 		a := NewAnalyzer(pack, e)
 
 		// Analyze() should only fire the resource-level deny rule.
-		analyzeResp, err := a.Analyze(plugin.AnalyzerResource{
+		analyzeResp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bad-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "bad-bucket",
@@ -500,7 +500,7 @@ stack_deny[msg] {
 				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-2"),
 		}
 
-		stackResp, err := a.AnalyzeStack(stackResources)
+		stackResp, err := a.AnalyzeStack(t.Context(), stackResources)
 		if err != nil {
 			t.Fatalf("AnalyzeStack returned error: %v", err)
 		}
@@ -538,7 +538,7 @@ stack_warn[msg] {
 				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::r2"),
 		}
 
-		resp, err := a.AnalyzeStack(resources)
+		resp, err := a.AnalyzeStack(t.Context(), resources)
 		if err != nil {
 			t.Fatalf("AnalyzeStack returned error: %v", err)
 		}
@@ -579,7 +579,7 @@ warn[msg] {
 				"urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket-1"),
 		}
 
-		resp, err := a.AnalyzeStack(resources)
+		resp, err := a.AnalyzeStack(t.Context(), resources)
 		if err != nil {
 			t.Fatalf("AnalyzeStack returned error: %v", err)
 		}
@@ -619,7 +619,7 @@ deny[msg] { msg := "fail" }
 	}
 
 	a := NewAnalyzer(pack, e)
-	resp, err := a.Remediate(plugin.AnalyzerResource{
+	resp, err := a.Remediate(t.Context(), plugin.AnalyzerResource{
 		URN:        resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::bucket"),
 		Type:       tokens.Type("aws:s3/bucket:Bucket"),
 		Name:       "bucket",
@@ -651,7 +651,7 @@ deny[msg] { msg := "fail" }
 	a := NewAnalyzer(pack, e)
 
 	VersionString = "1.2.3"
-	info, err := a.GetPluginInfo()
+	info, err := a.GetPluginInfo(t.Context())
 	if err != nil {
 		t.Fatalf("GetPluginInfo returned error: %v", err)
 	}
@@ -663,7 +663,7 @@ deny[msg] { msg := "fail" }
 	}
 
 	VersionString = "not-a-version"
-	_, err = a.GetPluginInfo()
+	_, err = a.GetPluginInfo(t.Context())
 	if err == nil {
 		t.Error("expected error for invalid version string")
 	}
@@ -720,7 +720,7 @@ stack_warn[msg] {
 
 	a := NewAnalyzer(pack, e)
 
-	info, err := a.GetAnalyzerInfo()
+	info, err := a.GetAnalyzerInfo(t.Context())
 	if err != nil {
 		t.Fatalf("GetAnalyzerInfo returned error: %v", err)
 	}

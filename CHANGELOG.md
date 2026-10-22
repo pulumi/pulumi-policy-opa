@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- **`config-schema.json` crashed the analyzer**: any pack with a config schema panicked in `GetAnalyzerInfo`
+  with `proto: invalid type: plugin.JSONSchema`. Bumped `github.com/pulumi/pulumi/sdk/v3` to v3.271.0, which
+  includes the fix (pulumi/pulumi#24775).
+
 ## v1.1.2
 
 ### Improvements

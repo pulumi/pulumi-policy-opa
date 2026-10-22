@@ -23,6 +23,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/pulumi/pulumi/sdk/v3/go/common/apitype"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
@@ -57,7 +59,7 @@ deny[msg] {
 				},
 			},
 		}
-		if err := a.Configure(config); err != nil {
+		if err := a.Configure(t.Context(), config); err != nil {
 			t.Fatalf("Configure failed: %v", err)
 		}
 
@@ -92,10 +94,45 @@ deny[msg] {
 				EnforcementLevel: "bogus",
 			},
 		}
-		if err := a.Configure(config); err == nil {
+		if err := a.Configure(t.Context(), config); err == nil {
 			t.Fatal("expected Configure to reject invalid enforcement level")
 		}
 	})
+}
+
+// TestConfigSchema_GetAnalyzerInfoOverGRPC guards against the SDK's analyzer server panicking
+// while marshaling a config schema (pulumi/pulumi#24748), which broke every pack with a config-schema.json.
+func TestConfigSchema_GetAnalyzerInfoOverGRPC(t *testing.T) {
+	t.Parallel()
+	dir := writeRegoFile(t, "policy.rego", `
+package test
+
+deny[msg] {
+    input.instanceType == data.config.deny.maxInstanceSize
+    msg := "instance type is not allowed"
+}
+`)
+	schema := `{"deny": {"properties": {"maxInstanceSize": {"type": "string"}}, "required": ["maxInstanceSize"]}}`
+	if err := os.WriteFile(filepath.Join(dir, "config-schema.json"), []byte(schema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pack, e, err := loadPolicyPack(dir)
+	if err != nil {
+		t.Fatalf("loadPolicyPack failed: %v", err)
+	}
+
+	info, err := plugin.NewAnalyzerServer(NewAnalyzer(pack, e)).GetAnalyzerInfo(t.Context(), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetAnalyzerInfo failed: %v", err)
+	}
+	if len(info.Policies) != 1 || info.Policies[0].ConfigSchema == nil {
+		t.Fatalf("expected one policy with a config schema, got %v", info.Policies)
+	}
+	cs := info.Policies[0].ConfigSchema
+	prop, _ := cs.Properties.AsMap()["maxInstanceSize"].(map[string]any)
+	if prop["type"] != "string" || len(cs.Required) != 1 || cs.Required[0] != "maxInstanceSize" {
+		t.Errorf("config schema not marshaled correctly: %v", cs)
+	}
 }
 
 func TestConfig_DataConfig(t *testing.T) {
@@ -668,7 +705,7 @@ warn_tags[msg] {
 	}
 
 	a := NewAnalyzer(pack, e)
-	info, err := a.GetAnalyzerInfo()
+	info, err := a.GetAnalyzerInfo(t.Context())
 	if err != nil {
 		t.Fatalf("GetAnalyzerInfo failed: %v", err)
 	}
@@ -968,7 +1005,7 @@ deny_size[msg] {
 		// No Configure() call — policyConfig is nil.
 
 		stderr := captureStderr(t, func() {
-			_, _ = a.Analyze(plugin.AnalyzerResource{
+			_, _ = a.Analyze(t.Context(), plugin.AnalyzerResource{
 				Type:       "test:index:Resource",
 				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(200)}),
 			})
@@ -1019,14 +1056,14 @@ deny_size[msg] {
 		}
 
 		a := NewAnalyzer(pack, e).(*analyzer)
-		_ = a.Configure(map[string]plugin.AnalyzerPolicyConfig{
+		_ = a.Configure(t.Context(), map[string]plugin.AnalyzerPolicyConfig{
 			"deny_size": {
 				Properties: map[string]any{"maxSize": float64(100)},
 			},
 		})
 
 		stderr := captureStderr(t, func() {
-			_, _ = a.Analyze(plugin.AnalyzerResource{
+			_, _ = a.Analyze(t.Context(), plugin.AnalyzerResource{
 				Type:       "test:index:Resource",
 				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(200)}),
 			})
@@ -1074,7 +1111,7 @@ deny_size[msg] {
 
 		// First call should warn.
 		stderr1 := captureStderr(t, func() {
-			_, _ = a.Analyze(plugin.AnalyzerResource{
+			_, _ = a.Analyze(t.Context(), plugin.AnalyzerResource{
 				Type:       "test:index:Resource",
 				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(200)}),
 			})
@@ -1085,7 +1122,7 @@ deny_size[msg] {
 
 		// Second call should not warn again.
 		stderr2 := captureStderr(t, func() {
-			_, _ = a.Analyze(plugin.AnalyzerResource{
+			_, _ = a.Analyze(t.Context(), plugin.AnalyzerResource{
 				Type:       "test:index:Resource",
 				Properties: resource.NewPropertyMapFromMap(map[string]any{"size": float64(300)}),
 			})
@@ -1115,7 +1152,7 @@ deny[msg] {
 		a := NewAnalyzer(pack, e).(*analyzer)
 
 		stderr := captureStderr(t, func() {
-			_, _ = a.Analyze(plugin.AnalyzerResource{
+			_, _ = a.Analyze(t.Context(), plugin.AnalyzerResource{
 				Type:       "test:index:Resource",
 				Properties: resource.NewPropertyMapFromMap(map[string]any{"count": float64(100)}),
 			})

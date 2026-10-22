@@ -27,7 +27,6 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/plugin"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
-	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
 )
 
 // VersionString is set via ldflags at build time using scripts/get-version.
@@ -55,7 +54,7 @@ func (a *analyzer) Name() tokens.QName {
 	return tokens.QName(a.pack.Name)
 }
 
-func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, error) {
+func (a *analyzer) Analyze(ctx context.Context, r plugin.AnalyzerResource) (plugin.AnalyzeResponse, error) {
 	a.warnMissingConfig()
 
 	var obj map[string]any
@@ -70,7 +69,7 @@ func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, e
 		obj = buildOPAInput(r)
 	}
 
-	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, resourceScope, a.policyConfig)
+	results, err := a.e.evalPolicyPack(ctx, a.pack, obj, resourceScope, a.policyConfig)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
 	}
@@ -78,7 +77,7 @@ func (a *analyzer) Analyze(r plugin.AnalyzerResource) (plugin.AnalyzeResponse, e
 	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, r.URN, a.policyConfig)}, nil
 }
 
-func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugin.AnalyzeResponse, error) {
+func (a *analyzer) AnalyzeStack(ctx context.Context, resources []plugin.AnalyzerStackResource) (plugin.AnalyzeResponse, error) {
 	a.warnMissingConfig()
 
 	// Short-circuit if no stack-level rules exist.
@@ -100,7 +99,7 @@ func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugi
 	} else {
 		obj = buildStackOPAInput(resources)
 	}
-	results, err := a.e.evalPolicyPack(context.Background(), a.pack, obj, stackScope, a.policyConfig)
+	results, err := a.e.evalPolicyPack(ctx, a.pack, obj, stackScope, a.policyConfig)
 	if err != nil {
 		return plugin.AnalyzeResponse{}, err
 	}
@@ -114,12 +113,12 @@ func (a *analyzer) AnalyzeStack(resources []plugin.AnalyzerStackResource) (plugi
 	return plugin.AnalyzeResponse{Diagnostics: buildDiagnostics(results, stackURN, a.policyConfig)}, nil
 }
 
-func (a *analyzer) Remediate(r plugin.AnalyzerResource) (plugin.RemediateResponse, error) {
+func (a *analyzer) Remediate(ctx context.Context, r plugin.AnalyzerResource) (plugin.RemediateResponse, error) {
 	// OPA analyzer does not support remediation
 	return plugin.RemediateResponse{}, nil
 }
 
-func (a *analyzer) GetAnalyzerInfo() (plugin.AnalyzerInfo, error) {
+func (a *analyzer) GetAnalyzerInfo(ctx context.Context) (plugin.AnalyzerInfo, error) {
 	var policies []plugin.AnalyzerPolicyInfo
 	for _, pol := range a.pack.Policies {
 		var policyType plugin.AnalyzerPolicyType
@@ -150,17 +149,17 @@ func (a *analyzer) GetAnalyzerInfo() (plugin.AnalyzerInfo, error) {
 	}, nil
 }
 
-func (a *analyzer) GetPluginInfo() (workspace.PluginInfo, error) {
+func (a *analyzer) GetPluginInfo(ctx context.Context) (plugin.PluginInfo, error) {
 	version, err := semver.Parse(VersionString)
 	if err != nil {
-		return workspace.PluginInfo{}, err
+		return plugin.PluginInfo{}, err
 	}
-	return workspace.PluginInfo{
+	return plugin.PluginInfo{
 		Version: &version,
 	}, nil
 }
 
-func (a *analyzer) Configure(policyConfig map[string]plugin.AnalyzerPolicyConfig) error {
+func (a *analyzer) Configure(ctx context.Context, policyConfig map[string]plugin.AnalyzerPolicyConfig) error {
 	// Validate enforcement levels before storing.
 	for name, cfg := range policyConfig {
 		if cfg.EnforcementLevel != "" {

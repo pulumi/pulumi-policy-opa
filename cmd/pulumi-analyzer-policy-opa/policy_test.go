@@ -461,7 +461,7 @@ deny[msg] {
 	}
 
 	a := NewAnalyzer(pack, e)
-	info, err := a.GetAnalyzerInfo()
+	info, err := a.GetAnalyzerInfo(t.Context())
 	if err != nil {
 		t.Fatalf("GetAnalyzerInfo failed: %v", err)
 	}
