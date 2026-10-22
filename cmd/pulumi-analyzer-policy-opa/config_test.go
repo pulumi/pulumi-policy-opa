@@ -129,7 +129,8 @@ deny[msg] {
 		t.Fatalf("expected one policy with a config schema, got %v", info.Policies)
 	}
 	cs := info.Policies[0].ConfigSchema
-	if cs.Properties.AsMap()["maxInstanceSize"] == nil || len(cs.Required) != 1 || cs.Required[0] != "maxInstanceSize" {
+	prop, _ := cs.Properties.AsMap()["maxInstanceSize"].(map[string]any)
+	if prop["type"] != "string" || len(cs.Required) != 1 || cs.Required[0] != "maxInstanceSize" {
 		t.Errorf("config schema not marshaled correctly: %v", cs)
 	}
 }
