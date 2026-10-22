@@ -77,7 +77,7 @@ func TestKubernetesAdmission_Integration(t *testing.T) {
 
 	t.Run("K8sResourceWithLabelViolation", func(t *testing.T) {
 		t.Parallel()
-		resp, err := a.Analyze(plugin.AnalyzerResource{
+		resp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:stack::proj::kubernetes:apps/v1:Deployment::bad-deploy"),
 			Type: tokens.Type("kubernetes:apps/v1:Deployment"),
 			Name: "bad-deploy",
@@ -111,7 +111,7 @@ func TestKubernetesAdmission_Integration(t *testing.T) {
 
 	t.Run("K8sResourceValid", func(t *testing.T) {
 		t.Parallel()
-		resp, err := a.Analyze(plugin.AnalyzerResource{
+		resp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:stack::proj::kubernetes:apps/v1:Deployment::good-deploy"),
 			Type: tokens.Type("kubernetes:apps/v1:Deployment"),
 			Name: "good-deploy",
@@ -139,7 +139,7 @@ func TestKubernetesAdmission_Integration(t *testing.T) {
 
 	t.Run("NonK8sResourceSkipped", func(t *testing.T) {
 		t.Parallel()
-		resp, err := a.Analyze(plugin.AnalyzerResource{
+		resp, err := a.Analyze(t.Context(), plugin.AnalyzerResource{
 			URN:  resource.URN("urn:pulumi:stack::proj::aws:s3/bucket:Bucket::my-bucket"),
 			Type: tokens.Type("aws:s3/bucket:Bucket"),
 			Name: "my-bucket",
@@ -233,7 +233,7 @@ stack_violation contains {"msg": msg} if {
 		},
 	}
 
-	resp, err := a.AnalyzeStack(resources)
+	resp, err := a.AnalyzeStack(t.Context(), resources)
 	if err != nil {
 		t.Fatalf("AnalyzeStack failed: %v", err)
 	}
